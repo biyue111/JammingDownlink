@@ -1,0 +1,118 @@
+import math as math
+from DDPG.ddpg import *
+from DownlinkEnv import *
+import configs as configs
+from tqdm import tqdm
+from utils.utilFunc import OrnsteinUhlenbeckProcess
+
+
+# -------------------- BS agent ------------------------
+class BSAgent:
+    def __init__(self, act_range):
+        # Create a ddpg network with
+        # actions: [power allocation in each channel, channel chosen for each user]
+        # states: [user position (x, y), channel chosen, data_rate] * number of user
+        # action range: [0, 1]
+        self.act_range = act_range
+        self.act_dim = configs.CHANNEL_NUM + configs.USER_NUM
+        self.state_dim = 4 * configs.USER_NUM
+        print(self.act_dim, self.state_dim)
+        self.brain = DDPG(self.act_dim, self.state_dim, act_range)
+        self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim)
+
+    def act(self, s, t):
+        a = self.brain.policy_action(s)
+        # Clip continuous values to be valid w.r.t. environment
+        a = np.clip(a + self.noise.generate(t), 0, self.act_range)
+        return a
+
+    def get_real_action(self, raw_a):
+        #  return "real" action: [power_allocation_ls, user_channel_ls]
+        raw_power_allocation = raw_a[0:configs.CHANNEL_NUM]
+        raw_user_channel_ls = raw_a[configs.CHANNEL_NUM:configs.CHANNEL_NUM+configs.USER_NUM]
+        power_allocation_ls = [raw_power_allocation[i] / sum(raw_power_allocation) for i in range(configs.CHANNEL_NUM)]
+        user_channel_ls = [math.floor(raw_user_channel_ls[i] * configs.CHANNEL_NUM) for i in range(configs.USER_NUM)]
+        return [power_allocation_ls, user_channel_ls]
+
+    def update_brain(self):
+        if self.brain.buffer.count > configs.BATCH_SIZE:
+            self.brain.train()
+
+    def memorize(self, old_state, a, r, new_state):
+        self.brain.memorize(old_state, a, r, new_state)
+
+
+# -------------------- JAMMER AGENT --------------------
+class JMRAgent:
+    def __init__(self):
+        self.power = configs.JAMMER_POWER
+
+    def act(self, s, t):
+        a = self.power * np.zeros(configs.CHANNEL_NUM)
+        return a
+
+
+# -------------------- ENVIRONMENT ---------------------
+class Environment:
+    def __init__(self):
+        self.pick_times = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        self.overall_step = 0.000
+        self.hundred_step = [0.000 for x in range(0, 100)]
+        self.env = DownlinkEnv()
+
+    def run(self, bs_agent, jmr_agent):
+
+        tqdm_e = tqdm(range(configs.UPDATE_NUM), desc='Score', leave=True, unit=" episodes")
+        old_state = np.zeros(4 * configs.USER_NUM)
+        for e in tqdm_e:
+            # print("e:", e)
+            # bs_distribution = bs_agent.brain.get_distribution(s)
+            # print("bs_distribution: ", bs_distribution)
+            # jammer_distribution = jammer_agent. brain.get_distribution(s)
+            # print("jammer_distribution: ", jammer_distribution)
+            # bs_r = self.env.step([action_ls])
+
+            # BS Actor takes an action
+            bs_raw_a_ls = bs_agent.act(old_state, e)
+            bs_a_ls = bs_agent.get_real_action(bs_raw_a_ls)
+            # Jammer takes an action
+            jmr_a_ls = jmr_agent.act(old_state, e)
+
+            # Retrieve new state, reward, and whether the state is terminal
+            r, new_state = self.env.step([bs_a_ls, jmr_a_ls])
+            # Add outputs to memory buffer
+            if e > 0:
+                bs_agent.memorize(old_state, bs_raw_a_ls, r, new_state)
+            # update the agent
+            bs_agent.update_brain()
+
+            # Update current state
+            old_state = new_state
+            # cumul_reward += r
+            # time += 1
+
+            # Show results
+            tqdm_e.set_description("Reward: " + str(r))
+            tqdm_e.refresh()
+
+
+# -------------------- MAIN ----------------------------
+
+# state_count = configs.STATE_CNT  # env.env.observation_space.shape[0]
+# action_count = configs.ACTION_CNT  # env.env.action_space.n
+
+# bs_agent = LFAQBSAgentPowerAllocation(state_count, action_count,
+#                                       configs.BS_LFAQ_TEMPERATURE, configs.BS_LFAQ_MIN_TEMPERATURE,
+#                                       configs.BS_LFAQ_ALPHA, configs.BS_LFAQ_BETA, configs.BS_LFAQ_GAMMA,
+#                                       configs.BS_LFAQ_KAPPA, configs.BS_LFAQ_UPDATE_LOOPS)
+# jammer_agent = LFAQJammerAgent(state_count, action_count,
+#                                configs.JMR_LFAQ_TEMPERATURE, configs.JMR_LFAQ_MIN_TEMPERATURE,
+#                                configs.JMR_LFAQ_ALPHA, configs.JMR_LFAQ_BETA, configs.JMR_LFAQ_GAMMA,
+#                                configs.JMR_LFAQ_KAPPA, configs.JMR_LFAQ_UPDATE_LOOPS, configs.JMR_POWER_FACTOR)
+bs_agent = BSAgent(1.0)
+jmr_agent = JMRAgent()
+env = Environment()
+try:
+    env.run(bs_agent, jmr_agent)
+finally:
+    pass
