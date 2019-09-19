@@ -28,14 +28,17 @@ class Actor:
         """
         inp = Input(shape=(self.env_dim,))
         #
-        x = Dense(256, activation='relu')(inp)
+        x = Dense(32, activation='relu')(inp)
+        x = GaussianNoise(1.0)(x)
+        #
+        x = Dense(32, activation='relu')(inp)
         x = GaussianNoise(1.0)(x)
         #
         # x = Flatten()(x)
-        x = Dense(128, activation='relu')(x)
+        x = Dense(16, activation='relu')(x)
         x = GaussianNoise(1.0)(x)
         #
-        out = Dense(self.act_dim, activation='tanh', kernel_initializer=RandomUniform())(x)
+        out = Dense(self.act_dim, activation='linear', kernel_initializer=RandomUniform())(x)
         out = Lambda(lambda i: i * self.act_range)(out)
         #
         return Model(inp, out)
@@ -55,7 +58,7 @@ class Actor:
         """
         W, target_W = self.model.get_weights(), self.target_model.get_weights()
         for i in range(len(W)):
-            target_W[i] = self.tau * W[i] + (1 - self.tau)* target_W[i]
+            target_W[i] = self.tau * W[i] + (1 - self.tau) * target_W[i]
         self.target_model.set_weights(target_W)
 
     def train(self, states, actions, grads):

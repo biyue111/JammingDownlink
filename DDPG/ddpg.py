@@ -15,7 +15,7 @@ class DDPG:
     Mainly refer to the code of @germain-hug
     """
 
-    def __init__(self, act_dim, env_dim, act_range, buffer_size=20000, gamma=0.99, lr=0.00005, tau=0.001):
+    def __init__(self, act_dim, env_dim, act_range, buffer_size=1500, gamma=0.0, lr=0.01, tau=0.9):
         """ Initialization
         """
         # Environment and A2C parameters
@@ -25,7 +25,7 @@ class DDPG:
         self.gamma = gamma
         self.lr = lr
         # Create actor and critic networks
-        self.actor = Actor(self.state_dim, self.act_dim, act_range, 0.1 * lr, tau)
+        self.actor = Actor(self.state_dim, self.act_dim, act_range, lr, tau)
         self.critic = Critic(self.state_dim, self.act_dim, lr, tau)
         self.buffer = AgentBuffer(buffer_size)
 

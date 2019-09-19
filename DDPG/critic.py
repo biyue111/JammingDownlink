@@ -30,9 +30,10 @@ class Critic:
         """
         state = Input((self.env_dim,))
         action = Input((self.act_dim,))
-        x = Dense(256, activation='relu')(state)
+        x = Dense(32, activation='relu')(state)
         x = concatenate([x, action])
-        x = Dense(128, activation='relu')(x)
+        x = Dense(16, activation='relu')(x)
+        x = Dense(16, activation='relu')(x)
         out = Dense(1, activation='linear', kernel_initializer=RandomUniform())(x)
         return Model([state, action], out)
 
@@ -56,7 +57,7 @@ class Critic:
         """
         W, target_W = self.model.get_weights(), self.target_model.get_weights()
         for i in range(len(W)):
-            target_W[i] = self.tau * W[i] + (1 - self.tau)* target_W[i]
+            target_W[i] = self.tau * W[i] + (1 - self.tau) * target_W[i]
         self.target_model.set_weights(target_W)
 
     def save(self, path):

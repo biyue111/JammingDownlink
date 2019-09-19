@@ -9,6 +9,15 @@ class DownlinkEnv:
         self.channel_num = configs.CHANNEL_NUM
         self.user_num = configs.USER_NUM
 
+    def get_init_state(self):
+        s = np.zeros(4 * self.user_num)
+        # Write user's position (x, y), channel chosen and data rate to the state
+        for i in range(self. user_num):
+            s[i*4] = self.user_positions[i][0]
+            s[i*4 + 1] = self.user_positions[i][1]
+            s[i * 4 + 2] = self.channel_num - 1
+        return s
+
     def generate_state(self, ch, r):
         s = np.zeros(4 * self.user_num)
         # Write user's position (x, y), channel chosen and data rate to the state
@@ -44,5 +53,6 @@ class DownlinkEnv:
                                                         user_num_ls[user_channel_ls[i]], i)  # TODO
 
         reward = sum(datarate_ls)  # TODO: fairness
+        print("reward list:" + str(datarate_ls))
         s_ = self.generate_state(user_channel_ls, datarate_ls)
         return reward, s_

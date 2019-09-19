@@ -3,12 +3,13 @@ import math
 
 # General configs
 CHANNEL_NUM = 3
-UPDATE_NUM = 1000
+UPDATE_NUM = 4000
 
 # BS  and users common configs
-USER_NUM = 4
+USER_NUM = 2
 USER_POSITIONS = np.array([[1.0, 1.0], [-1.0, 1.0], [1.0, -1.0], [-1.0, -1.0]])
-BATCH_SIZE = 30
+BATCH_SIZE = 100
+BS_MAX_POWER = 10
 
 # Jammer common configs
 JAMMER_POWER = 10.0
