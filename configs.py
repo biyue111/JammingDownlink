@@ -3,12 +3,13 @@ import math
 
 # General configs
 CHANNEL_NUM = 3
-UPDATE_NUM = 4000
+UPDATE_NUM = 1100
+SINR_THRESHOLD = 0.5
 
 # BS  and users common configs
-USER_NUM = 2
+USER_NUM = 3
 USER_POSITIONS = np.array([[1.0, 1.0], [-1.0, 1.0], [1.0, -1.0], [-1.0, -1.0]])
-BATCH_SIZE = 100
+BATCH_SIZE = 499
 BS_MAX_POWER = 10
 
 # Jammer common configs
@@ -32,7 +33,7 @@ print("J2U_PATHLOSS", J2U_PATHLOSS[0], J2U_PATHLOSS[1])
 NOISE = 0.01
 
 
-def calculate_datarate(bs_power: float, jammer_power: float, user_num_in_channel: int, user_id: int) -> float:
+def calculate_datarate(bs_power: float, jammer_power: float, user_num_in_channel: int, user_id: int):
     """
     :param bs_power:
     :param jammer_power:
@@ -42,4 +43,4 @@ def calculate_datarate(bs_power: float, jammer_power: float, user_num_in_channel
     interference = jammer_power * J2U_PATHLOSS[user_id] + NOISE
     sinr = bs_power * B2U_PATHLOSS[user_id] / interference
     data_rate = math.log2(1 + sinr) / user_num_in_channel
-    return data_rate
+    return sinr, data_rate

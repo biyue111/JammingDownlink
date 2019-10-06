@@ -1,81 +1,138 @@
 import numpy as np
 import tensorflow as tf
-import keras.backend as K
+import math as math
+import configs
 
-from keras.initializers import RandomUniform
-from keras.models import Model
-from keras.layers import Input, Dense, Reshape, LSTM, Lambda, BatchNormalization, GaussianNoise, Flatten
+# import keras.backend as K
+# from keras.initializers import RandomUniform
+# from keras.models import Model
+# from keras.layers import Input, Dense, Reshape, LSTM, Lambda, BatchNormalization, GaussianNoise, Flatten
 
 
 class Actor:
     """ Actor Network for the DDPG Algorithm
     """
 
-    def __init__(self, inp_dim, out_dim, act_range, lr, tau):
-        self.env_dim = inp_dim
-        self.act_dim = out_dim
+    def __init__(self, sess, state_dim, action_dim, act_range, lr, tau_in):
+        # self.env_dim = inp_dim
+        # self.act_dim = out_dim
         self.act_range = act_range
-        self.tau = tau
+        self.tau_in = tau_in
         self.lr = lr
-        self.model = self.network()
-        self.target_model = self.network()
-        self.adam_optimizer = self.optimizer()
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+        self.sess = sess
 
-    def network(self):
+        # Create network and target network
+        self.state_input, self.action_output, \
+        self.net = self.create_network(state_dim, action_dim)
+
+        self.target_state_input, self.target_action_output, \
+        self.target_update, self.target_net = self.create_target_network(state_dim, action_dim, self.net)
+
+        self.create_training_method()
+
+        self.sess.run(tf.initialize_all_variables())
+
+        self.update_target()
+
+    def create_training_method(self):
+        self.q_gradient_input = tf.placeholder("float", [None, self.action_dim])
+        self.parameters_gradients = tf.gradients(self.action_output, self.net, -self.q_gradient_input)
+        self.optimizer = tf.train.AdamOptimizer(self.lr).apply_gradients(zip(self.parameters_gradients, self.net))
+        ## regularization l2norm
+        # weight_decay = tf.add_n([1e-3 * tf.nn.l2_loss(var) for var in self.net])
+        # self.regularizer = tf.train.AdamOptimizer(self.lr).minimize(weight_decay)
+
+    def create_network(self, state_dim, action_dim):
         """ Actor Network for Policy function Approximation, using a tanh
         activation for continuous control. We add parameter noise to encourage
         exploration, and balance it with Layer Normalization.
         """
-        inp = Input(shape=(self.env_dim,))
-        #
-        x = Dense(32, activation='relu')(inp)
-        x = GaussianNoise(1.0)(x)
-        #
-        x = Dense(32, activation='relu')(inp)
-        x = GaussianNoise(1.0)(x)
-        #
-        # x = Flatten()(x)
-        x = Dense(16, activation='relu')(x)
-        x = GaussianNoise(1.0)(x)
-        #
-        out = Dense(self.act_dim, activation='linear', kernel_initializer=RandomUniform())(x)
-        out = Lambda(lambda i: i * self.act_range)(out)
-        #
-        return Model(inp, out)
+        layer1_size = 100
+        layer2_size = 50
+        channel_num = configs.CHANNEL_NUM
+        user_num = configs.USER_NUM
 
-    def predict(self, state):
-        """ Action prediction
-        """
-        return self.model.predict(np.expand_dims(state, axis=0))
+        state_input = tf.placeholder("float", [None, state_dim])
 
-    def target_predict(self, inp):
-        """ Action prediction (target network)
-        """
-        return self.target_model.predict(inp)
+        W1 = self.variable([state_dim, layer1_size], state_dim)
+        b1 = self.variable([layer1_size], state_dim)
+        W2 = self.variable([layer1_size, layer2_size], layer1_size)
+        b2 = self.variable([layer2_size], layer1_size)
+        W3 = tf.Variable(tf.random_uniform([layer2_size, channel_num], -3e-3, 3e-3))
+        b3 = tf.Variable(tf.random_uniform([channel_num], -3e-3, 3e-3))
 
-    def transfer_weights(self):
-        """ Transfer model weights to target model with a factor of Tau
-        """
-        W, target_W = self.model.get_weights(), self.target_model.get_weights()
-        for i in range(len(W)):
-            target_W[i] = self.tau * W[i] + (1 - self.tau) * target_W[i]
-        self.target_model.set_weights(target_W)
+        layer1 = tf.nn.relu(tf.matmul(state_input, W1) + b1)
+        layer2 = tf.nn.relu(tf.matmul(layer1, W2) + b2)
+        action_channel = tf.tanh(tf.matmul(layer2, W3) + b3)
 
-    def train(self, states, actions, grads):
-        """ Actor Training
-        """
-        self.adam_optimizer([states, grads])
+        W4 = self.variable([channel_num, layer1_size], channel_num)
+        b4 = self.variable([layer1_size], channel_num)
+        W5 = tf.Variable(tf.random_uniform([layer1_size, user_num], -3e-3, 3e-3))
+        b5 = tf.Variable(tf.random_uniform([user_num], -3e-3, 3e-3))
+        layer4 = tf.nn.relu(tf.matmul(action_channel, W4) + b4)
+        action_energy = tf.tanh(tf.matmul(layer4, W5) + b5)
+        action_output = tf.concat([action_energy, action_channel], axis=1)
 
-    def optimizer(self):
-        """ Actor Optimizer
-        """
-        action_gdts = K.placeholder(shape=(None, self.act_dim))
-        params_grad = tf.gradients(self.model.output, self.model.trainable_weights, -action_gdts)
-        grads = zip(params_grad, self.model.trainable_weights)
-        return K.function([self.model.input, action_gdts], [tf.train.AdamOptimizer(self.lr).apply_gradients(grads)][1:])
+        return state_input, action_output, [W1, b1, W2, b2, W3, b3, W4, b4, W5, b5]
 
-    def save(self, path):
-        self.model.save_weights(path + '_actor.h5')
+    def create_target_network(self, state_dim, action_dim, net):
+        state_input = tf.placeholder("float", [None, state_dim])
+        self.tau = tf.placeholder("float")
+        ema = tf.train.ExponentialMovingAverage(decay=1 - self.tau)
+        target_update = ema.apply(net)
+        target_net = [ema.average(x) for x in net]
 
-    def load_weights(self, path):
-        self.model.load_weights(path)
+        layer1 = tf.nn.relu(tf.matmul(state_input, target_net[0]) + target_net[1])
+        layer2 = tf.nn.relu(tf.matmul(layer1, target_net[2]) + target_net[3])
+        action_channel = tf.tanh(tf.matmul(layer2, target_net[4]) + target_net[5])
+
+        layer4 = tf.nn.relu(tf.matmul(action_channel, target_net[6]) + target_net[7])
+        # layer5 = tf.nn.relu(tf.matmul(layer4, target_net[8]) + target_net[9])
+        action_energy = tf.tanh(tf.matmul(layer4, target_net[8]) + target_net[9])
+
+        action_output = tf.concat([action_energy, action_channel], axis=1)
+
+        return state_input, action_output, target_update, target_net
+
+    def update_target(self):
+        self.sess.run(self.target_update, feed_dict={
+            self.tau: self.tau_in
+        })
+
+    def pre_train_target(self):
+        self.sess.run(self.target_update, feed_dict={
+            self.tau: 1.0
+        })
+
+    def train(self, q_gradient_batch, state_batch):
+        self.sess.run(self.optimizer, feed_dict={
+            self.q_gradient_input: q_gradient_batch,
+            self.state_input: state_batch})
+
+    def actions(self, state_batch):
+        return self.sess.run(self.action_output, feed_dict={
+                        self.state_input: state_batch})
+
+    def action(self, state):
+        return self.sess.run(self.action_output, feed_dict={
+                        self.state_input: [state]})[0]
+
+    def target_actions(self, state_batch):
+        return self.sess.run(self.target_action_output, feed_dict={
+            self.target_state_input: state_batch})
+
+    def target_action(self, state):
+        return self.sess.run(self.target_action_output, feed_dict={
+            self.target_state_input: [state]})[0]
+
+    # def save(self, path):
+    #     self.model.save_weights(path + '_actor.h5')
+    #
+    # def load_weights(self, path):
+    #     self.model.load_weights(path)
+
+    # f fan-in size
+    def variable(self, shape, f):
+        return tf.Variable(tf.random_uniform(shape, -1 / math.sqrt(f), 1 / math.sqrt(f)))

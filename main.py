@@ -5,7 +5,7 @@ import configs as configs
 from tqdm import tqdm
 from utils.utilFunc import OrnsteinUhlenbeckProcess
 import matplotlib.pyplot as plt
-
+import csv
 
 # -------------------- BS agent ------------------------
 class BSAgent:
@@ -20,16 +20,38 @@ class BSAgent:
         self.state_dim = 4 * configs.USER_NUM
         # print(self.act_dim, self.state_dim)
         self.brain = DDPG(self.act_dim, self.state_dim, act_range)
-        self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim)
+        self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim, n_steps_annealing=1000)
 
     def act(self, s, t):
+        fix_power_flag = 0
+        fix_channel_flag = 0
         # print("The state:" + str(s))
         a = self.brain.policy_action(s)
         # Clip continuous values to be valid w.r.t. environment
         print("a directly from brain:" + str(a))
-        v = self.brain.critic.target_predict([np.expand_dims(s, axis=0), np.expand_dims(a, axis=0)])
-        print("Value of action:", v)
-        a = np.clip(a + self.noise.generate(t), -self.act_range, self.act_range)
+        a_es_raw = self.brain.actor.action(s)
+        print("a estimation directly from brain:" + str(a_es_raw))
+        a_es = self.get_real_action(a_es_raw)
+        print("Real a estimation directly from brain:" + str(a_es))
+        v = self.brain.critic.target_q(np.expand_dims(s, axis=0), np.expand_dims(a, axis=0))
+        print("Value of the chosen action:", v)
+        noise = self.noise.generate(t)
+        print("Noise: ", noise)
+        a = np.clip(a + noise, -self.act_range, self.act_range)
+        if fix_power_flag == 1:
+            for i in range(configs.CHANNEL_NUM):
+                a[i] = 0.5
+        if fix_channel_flag == 1:
+            step = 2.0 / (configs.CHANNEL_NUM * 1.0 - 1.0)
+            action_value = -1.0
+            # for i in range(configs.USER_NUM):
+            #     a[i + configs.CHANNEL_NUM] = action_value
+            #     action_value += step
+            #     if action_value > 1.0:
+            #         action_value = -1.0
+            for i in range(configs.USER_NUM):
+                a[i + configs.CHANNEL_NUM] = 0
+
         return a
 
     def get_real_action(self, raw_a):
@@ -60,14 +82,54 @@ class BSAgent:
     def memorize(self, old_state, a, r, new_state):
         self.brain.memorize(old_state, a, r, new_state)
 
-    def critic_test(self, s):
-        a_c = 0.7
-        a = np.array([[1, 1, 1, -a_c, -a_c], [1, 1, 1, -a_c, a_c],
-                      [1, 1, 1, a_c, -a_c], [1, 1, 1, a_c, a_c]])
-        v = np.zeros(len(a))
-        for i in range(len(a)):
-            v[i] = self.brain.critic.target_predict([np.expand_dims(s, axis=0), np.expand_dims(a[i], axis=0)])
-        print("The value of pairs: ", v)
+    def pre_train(self, states, bs_actions, rewards):
+        # Generate pre-train data
+        self.brain.pre_train(states, bs_actions, rewards, states)
+
+    def critic_test(self, s, file_name):
+        #  Print critic network
+        csv_file = open(file_name, 'w', newline='')
+        writer = csv.writer(csv_file)
+        a3 = np.arange(-1, 1, 0.05)
+        raw_a3 = [(a3[i] + self.act_range)/(2*self.act_range) for i in range(len(a3))]
+        real_a3 = [math.floor(raw_a3[i] * configs.CHANNEL_NUM) for i in range(len(a3))]
+        writer.writerow(a3)
+        writer.writerow(real_a3)
+
+        a1 = -1
+        a2 = -1
+        v = np.zeros(len(a3))
+        t_v = np.zeros(len(a3))
+        for i in range(len(a3)):
+            a = [1, 1, 1, a1, a2, a3[i]]
+            t_v[i] = self.brain.critic.target_q(np.expand_dims(s, axis=0), np.expand_dims(a, axis=0))
+            v[i] = self.brain.critic.q_value(np.expand_dims(s, axis=0), np.expand_dims(a, axis=0))
+        writer.writerow(t_v)
+        writer.writerow(v)
+        # print("The value of pairs: ", v)
+
+        a1 = -1
+        a2 = 0
+        v = np.zeros(len(a3))
+        for i in range(len(a3)):
+            a = [1, 1, 1, a1, a2, a3[i]]
+            t_v[i] = self.brain.critic.target_q(np.expand_dims(s, axis=0), np.expand_dims(a, axis=0))
+            v[i] = self.brain.critic.q_value(np.expand_dims(s, axis=0), np.expand_dims(a, axis=0))
+        writer.writerow(t_v)
+        writer.writerow(v)
+        # print("The value of pairs: ", v)
+        # csv_file.close()
+
+    def actor_test(self, s):
+        # s = [1.0, 1.0, 1.0, 3.65596417, -1.0, 1.0, 1.0, 3.65596417]
+        raw_a = self.brain.actor.action(s)
+        raw_a_t = self.brain.actor.target_action(s)
+        a = self.get_real_action(raw_a)
+        a_t = self.get_real_action(raw_a_t)
+        print("Pre-train actor test: ", raw_a, a)
+        print("Pre-train actor test: ", raw_a_t, a_t)
+        v = self.brain.critic.target_q(np.expand_dims(s, axis=0), np.expand_dims(raw_a, axis=0))
+        print("Pre-train actor test q-value: ", v)
 
 
 # -------------------- JAMMER AGENT --------------------
@@ -76,7 +138,10 @@ class JMRAgent:
         self.power = configs.JAMMER_POWER
 
     def act(self, s, t):
-        a = self.power * np.zeros(configs.CHANNEL_NUM)
+        a = np.zeros(configs.CHANNEL_NUM)
+        a[0] = 1.0
+        a = a * self.power * 10
+        print("Jammer's action: ", a)
         return a
 
 
@@ -88,10 +153,49 @@ class Environment:
         self.hundred_step = [0.000 for x in range(0, 100)]
         self.env = DownlinkEnv()
 
+    def bs_pre_train(self, bs_agent, s):
+        # Generate actions
+        print("------------Begin pre-train------------")
+        ch_step = 2.0 / (1.0 * configs.CHANNEL_NUM)  # The "wide" of a channel
+        a_channels_bound = np.arange(-1, 1 + ch_step, ch_step)
+        j = 0
+        a_channels = np.zeros(configs.CHANNEL_NUM * 2)  # Channel upper and channel lower
+        for i in range(len(a_channels_bound) - 1):  # One channel, two data points
+            a_channels[j] = a_channels_bound[i] + ch_step / 10.0
+            j += 1
+            a_channels[j] = a_channels_bound[i+1] - ch_step / 10.0
+            j += 1
+        print("a_channels:", a_channels)
+
+        a_channel_list = np.array(np.meshgrid(a_channels, a_channels, a_channels)).T.reshape(-1, 3)
+        jmr_a = np.zeros(configs.CHANNEL_NUM)
+        bs_raw_actions = []
+        rewards = []
+        states = []
+        for i in range(len(a_channel_list)):
+            bs_raw_a = np.hstack((np.ones(configs.CHANNEL_NUM), a_channel_list[i]))
+            bs_a = bs_agent.get_real_action(bs_raw_a)
+            r, new_s = self.env.step([bs_a, jmr_a])
+            bs_raw_actions.append(bs_raw_a)
+            rewards.append(r)
+            states.append(s)
+        print("Pre-train input data list:")
+        for i in range(len(a_channel_list)):
+            print(states[i], bs_raw_actions[i], rewards[i])
+
+        bs_agent.pre_train(np.array(states), np.array(bs_raw_actions), np.array(rewards))
+
     def run(self, bs_agent, jmr_agent):
         tqdm_e = tqdm(range(configs.UPDATE_NUM), desc='Score', leave=True, unit=" episodes")
         old_state = self.env.get_init_state()
         records = np.zeros(configs.UPDATE_NUM)
+
+        # self.bs_pre_train(bs_agent, old_state)
+        # bs_agent.critic_test(old_state, 'critic_pre_train_test.csv')
+        # bs_agent.actor_test(old_state)
+
+        reward_list = np.zeros(configs.UPDATE_NUM)
+
         for e in range(configs.UPDATE_NUM):
             # print("e:", e)
             # bs_distribution = bs_agent.brain.get_distribution(s)
@@ -108,19 +212,24 @@ class Environment:
             jmr_a_ls = jmr_agent.act(old_state, e)
 
             # Retrieve new state, reward, and whether the state is terminal
+            print([bs_a_ls, jmr_a_ls])
             r, new_state = self.env.step([bs_a_ls, jmr_a_ls])
+            reward_list[e] = r
+            # print("New state: ", new_state)
             # Add outputs to memory buffer
             if e > 0:
                 bs_agent.memorize(old_state, bs_raw_a_ls, r, new_state)
             # update the agent
-            bs_agent.update_brain()
+            if e % 100 == 0:
+                bs_agent.update_brain()
 
             # Update current state
             old_state = new_state
 
             # Test BS agent critic network
-            if e >= 500:
-                bs_agent.critic_test(old_state)
+            # if e >= 500:
+            #     bs_agent.critic_test(old_state)
+                # bs_agent.actor_test()
 
             # Show results
             records[e] = r
@@ -130,7 +239,12 @@ class Environment:
             # tqdm_e.set_description("Actions:" + str(bs_a_ls) + "Reward: " + str(r))
             # tqdm_e.refresh()
 
-        plt.plot(records)
+        bs_agent.critic_test(old_state, 'critic_test.csv')
+        # Write reward to a csv file
+        csv_file = open('Reword list', 'w', newline='')
+        writer = csv.writer(csv_file)
+        writer.writerow(reward_list)
+        csv_file.close()
 
 
 # -------------------- MAIN ----------------------------
