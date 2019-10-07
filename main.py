@@ -240,10 +240,32 @@ class Environment:
             # tqdm_e.refresh()
 
         bs_agent.critic_test(old_state, 'critic_test.csv')
-        # Write reward to a csv file
-        csv_file = open('Reword list', 'w', newline='')
+        # Write reward and success rate to a csv file
+        csv_file = open('CHACNet Reward list.csv', 'w', newline='')
         writer = csv.writer(csv_file)
         writer.writerow(reward_list)
+        csv_file.close()
+        csv_file = open('CHACNet jammed flag list.csv', 'w', newline='')
+        writer = csv.writer(csv_file)
+        writer.writerow(jammed_flag_list)
+        csv_file.close()
+        csv_file = open('CHACNet state records.csv', 'w', newline='')
+        writer = csv.writer(csv_file)
+        for i in range(configs.USER_NUM * 4):
+            state_record = [state_records[j][i] for j in range(configs.UPDATE_NUM)]
+            writer.writerow(state_record)
+        csv_file.close()
+        csv_file = open('CHACNet power allocation records.csv', 'w', newline='')
+        writer = csv.writer(csv_file)
+        for i in range(configs.CHANNEL_NUM):
+            power_allocation_record = [power_allocation_records[j][i] for j in range(configs.UPDATE_NUM)]
+            writer.writerow(power_allocation_record)
+        csv_file.close()
+        csv_file = open('CHACNet channel choosing records.csv', 'w', newline='')
+        writer = csv.writer(csv_file)
+        for i in range(configs.USER_NUM):
+            state_record = [state_records[j][i] for j in range(configs.UPDATE_NUM)]
+            writer.writerow(state_record)
         csv_file.close()
 
 
