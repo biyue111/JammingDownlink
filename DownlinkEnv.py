@@ -61,7 +61,7 @@ class DownlinkEnv:
         # Check choosing jammed channel or not
         jammed_flag = 0
         for i in range(self.user_num):
-            if sinr_ls[i] < self.sinr_threshold:
+            if sinr_ls[i] < self.sinr_threshold and jammer_power_allocation[user_channel_ls[i]] > 0:
                 jammed_flag = 1
 
         reward = 0
@@ -69,11 +69,13 @@ class DownlinkEnv:
             reward = jammed_reward_offset
         # elif congested_user_num > 0:
         #     reward = congested_user_reward_offset - congested_user_num
-        else:
-            reward += sum(datarate_ls)  # TODO: fairness
+        reward += sum(datarate_ls)  # TODO: fairness
         # print("data rate list:" + str(datarate_ls))
 
-        return reward, datarate_ls
+        return jammed_flag, reward, datarate_ls
+
+    def bs_virtual_step(self, action_ls):
+        return self.step(action_ls)
 
     def step(self, action_ls):
         """
@@ -89,7 +91,7 @@ class DownlinkEnv:
         bs_power_allocation = bs_action_ls[0]
         user_channel_ls = bs_action_ls[1]
 
-        reward, datarate_ls = self.calculate_bs_reward(bs_power_allocation, user_channel_ls, jammer_power_allocation)
-
+        jammed_flag, reward, datarate_ls = self.calculate_bs_reward(bs_power_allocation, user_channel_ls, jammer_power_allocation)
         s_ = self.generate_state(user_channel_ls, datarate_ls)
-        return reward, s_
+
+        return jammed_flag, reward, s_

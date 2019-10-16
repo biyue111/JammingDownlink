@@ -3,9 +3,10 @@ from DDPG.ddpg import *
 from DownlinkEnv import *
 import configs as configs
 from tqdm import tqdm
-from utils.utilFunc import OrnsteinUhlenbeckProcess
+from utils.utilFunc import *
 import matplotlib.pyplot as plt
 import csv
+
 
 # -------------------- BS agent ------------------------
 class BSAgent:
@@ -17,13 +18,16 @@ class BSAgent:
         self.max_power = configs.BS_MAX_POWER
         self.act_range = act_range
         self.act_dim = configs.CHANNEL_NUM + configs.USER_NUM
+        channel_step = 2.0 / (configs.CHANNEL_NUM * 1.0)
+        self.channel_raw_action_ls = np.arange(-1.0 + 0.1 * channel_step, 1.0, channel_step)
         self.state_dim = 4 * configs.USER_NUM
         # print(self.act_dim, self.state_dim)
         self.brain = DDPG(self.act_dim, self.state_dim, act_range)
         self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim, n_steps_annealing=1000)
+        self.virtual_action_step = configs.VIRTUAL_ACTION_STEP
 
     def act(self, s, t):
-        fix_power_flag = 0
+        fix_power_flag = 1
         fix_channel_flag = 0
         # print("The state:" + str(s))
         a = self.brain.policy_action(s)
@@ -51,17 +55,16 @@ class BSAgent:
             #         action_value = -1.0
             for i in range(configs.USER_NUM):
                 a[i + configs.CHANNEL_NUM] = 0
-
         return a
 
     def get_real_action(self, raw_a):
         #  return "real" action: [power_allocation_ls, user_channel_ls]
         raw_power_allocation = raw_a[0:configs.CHANNEL_NUM]
-        raw_user_channel_ls = raw_a[configs.CHANNEL_NUM:configs.CHANNEL_NUM+configs.USER_NUM]
+        raw_user_channel_ls = raw_a[configs.CHANNEL_NUM:configs.CHANNEL_NUM + configs.USER_NUM]
         # Normalization
-        raw_power_allocation = [(raw_power_allocation[i] + self.act_range)/(2*self.act_range)
+        raw_power_allocation = [(raw_power_allocation[i] + self.act_range) / (2 * self.act_range)
                                 for i in range(configs.CHANNEL_NUM)]
-        raw_user_channel_ls = [(raw_user_channel_ls[i] + self.act_range)/(2*self.act_range)
+        raw_user_channel_ls = [(raw_user_channel_ls[i] + self.act_range) / (2 * self.act_range)
                                for i in range(configs.USER_NUM)]
         # Calculate the meaningful action (power and channel chosen)
         if sum(raw_power_allocation) == 0:
@@ -79,6 +82,9 @@ class BSAgent:
         if self.brain.buffer.count > configs.BATCH_SIZE:
             self.brain.train()
 
+    def virtual_update_brain(self, states, bs_actions, rewards, next_states):
+        self.brain.virtual_train(states, bs_actions, rewards, next_states)
+
     def memorize(self, old_state, a, r, new_state):
         self.brain.memorize(old_state, a, r, new_state)
 
@@ -86,12 +92,26 @@ class BSAgent:
         # Generate pre-train data
         self.brain.pre_train(states, bs_actions, rewards, states)
 
+    def get_virtual_actions(self, real_raw_action):
+        # Generate virtual actions
+        channel_chosen = real_raw_action[configs.USER_NUM:(configs.USER_NUM + configs.CHANNEL_NUM)]
+        pa_step = 1.0 * self.virtual_action_step  # The "wide" of a channel
+        a_pa = np.arange(-1, 1 + pa_step, pa_step)
+
+        a_pa_ls = np.array(np.meshgrid(a_pa, a_pa, a_pa)).T.reshape(-1, 3)  # TODO generalize
+        virtual_actions = np.zeros((len(a_pa_ls), configs.USER_NUM + configs.CHANNEL_NUM))
+        for i in range(len(a_pa_ls)):
+            virtual_actions[i] = np.hstack((a_pa_ls[i], channel_chosen))
+        print("Number of Virtual actions: ", len(virtual_actions))
+        print("Virtual actions: ", virtual_actions)
+        return virtual_actions
+
     def critic_test(self, s, file_name):
         #  Print critic network
         csv_file = open(file_name, 'w', newline='')
         writer = csv.writer(csv_file)
         a3 = np.arange(-1, 1, 0.05)
-        raw_a3 = [(a3[i] + self.act_range)/(2*self.act_range) for i in range(len(a3))]
+        raw_a3 = [(a3[i] + self.act_range) / (2 * self.act_range) for i in range(len(a3))]
         real_a3 = [math.floor(raw_a3[i] * configs.CHANNEL_NUM) for i in range(len(a3))]
         writer.writerow(a3)
         writer.writerow(real_a3)
@@ -163,7 +183,7 @@ class Environment:
         for i in range(len(a_channels_bound) - 1):  # One channel, two data points
             a_channels[j] = a_channels_bound[i] + ch_step / 10.0
             j += 1
-            a_channels[j] = a_channels_bound[i+1] - ch_step / 10.0
+            a_channels[j] = a_channels_bound[i + 1] - ch_step / 10.0
             j += 1
         print("a_channels:", a_channels)
 
@@ -194,7 +214,11 @@ class Environment:
         # bs_agent.critic_test(old_state, 'critic_pre_train_test.csv')
         # bs_agent.actor_test(old_state)
 
+        jammed_flag_list = np.zeros(configs.UPDATE_NUM)
         reward_list = np.zeros(configs.UPDATE_NUM)
+        state_records = np.zeros((configs.UPDATE_NUM, configs.USER_NUM * 4))
+        power_allocation_records = np.zeros((configs.UPDATE_NUM, configs.CHANNEL_NUM))
+        user_channel_choosing_records = np.zeros((configs.UPDATE_NUM, configs.USER_NUM))
 
         for e in range(configs.UPDATE_NUM):
             # print("e:", e)
@@ -213,13 +237,30 @@ class Environment:
 
             # Retrieve new state, reward, and whether the state is terminal
             print([bs_a_ls, jmr_a_ls])
-            r, new_state = self.env.step([bs_a_ls, jmr_a_ls])
+            jammed_flag, r, new_state = self.env.step([bs_a_ls, jmr_a_ls])
+            jammed_flag_list[e] = jammed_flag
             reward_list[e] = r
+            state_records[e] = new_state
+            power_allocation_records[e] = bs_a_ls[0]
+            user_channel_choosing_records[e] = bs_a_ls[1]
+
             # print("New state: ", new_state)
             # Add outputs to memory buffer
             if e > 0:
                 bs_agent.memorize(old_state, bs_raw_a_ls, r, new_state)
-            # update the agent
+
+            """ Update using virtual data """
+            # if e > 0:
+            #     bs_virtual_raw_actions = bs_agent.get_virtual_actions(bs_raw_a_ls)
+            #     v_rewards = np.zeros(len(bs_virtual_raw_actions))
+            #     v_old_states = np.zeros((len(bs_virtual_raw_actions), configs.USER_NUM * 4))
+            #     v_next_states = np.zeros((len(bs_virtual_raw_actions), configs.USER_NUM * 4))
+            #     for k in range(len(bs_virtual_raw_actions)):
+            #         v_old_states[k] = old_state
+            #         v_bs_action = bs_agent.get_real_action(bs_virtual_raw_actions[k])
+            #         v_jammed_flag, v_rewards[k], v_next_states[k] = self.env.bs_virtual_step([v_bs_action, jmr_a_ls])
+            #     bs_agent.virtual_update_brain(v_old_states, bs_virtual_raw_actions, v_rewards, v_next_states)
+
             if e % 100 == 0:
                 bs_agent.update_brain()
 
@@ -229,7 +270,7 @@ class Environment:
             # Test BS agent critic network
             # if e >= 500:
             #     bs_agent.critic_test(old_state)
-                # bs_agent.actor_test()
+            # bs_agent.actor_test()
 
             # Show results
             records[e] = r
@@ -239,6 +280,7 @@ class Environment:
             # tqdm_e.set_description("Actions:" + str(bs_a_ls) + "Reward: " + str(r))
             # tqdm_e.refresh()
 
+        # --------- Print results ---------
         bs_agent.critic_test(old_state, 'critic_test.csv')
         # Write reward and success rate to a csv file
         csv_file = open('CHACNet Reward list.csv', 'w', newline='')

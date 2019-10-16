@@ -8,6 +8,7 @@ from .critic import Critic
 # from utils.stats import gather_stats
 # from utils.networks import tfSummary, OrnsteinUhlenbeckProcess
 from utils.agent_buffer import AgentBuffer
+from utils.utilFunc import *
 
 
 # TODO: memory buffer
@@ -17,7 +18,7 @@ class DDPG:
     Mainly refer to the code of @germain-hug
     """
 
-    def __init__(self, act_dim, env_dim, act_range, buffer_size=1000, gamma=0.0, lr=0.01, tau=0.5):
+    def __init__(self, act_dim, env_dim, act_range, buffer_size=600, gamma=0.0, lr=0.001, tau=0.05):
         """ Initialization
         """
         # Environment and A2C parameters
@@ -31,11 +32,55 @@ class DDPG:
         self.actor = Actor(self.sess, self.state_dim, self.act_dim, act_range, lr * 0.1, tau)
         self.critic = Critic(self.sess, self.state_dim, self.act_dim, lr, tau)
         self.buffer = AgentBuffer(buffer_size)
+        action_step = 2.0 / (configs.CHANNEL_NUM * 1.0)
+        self.discrete_action_ls = np.arange(-1.0 + 0.1*action_step, 1.0, action_step)
+        print("discrete_action_ls: ", self.discrete_action_ls)
+
+    def get_discrete_action(self, s, raw_a):
+        # Get discrete action with Wolpertinger Policy
+        action_element_list = np.array([])
+        for i in range(configs.CHANNEL_NUM, configs.CHANNEL_NUM + configs.USER_NUM):
+            if raw_a[i] < self.discrete_action_ls[0]:
+                tmp_element = np.array([self.discrete_action_ls[0], self.discrete_action_ls[0]])
+            elif raw_a[i] > self.discrete_action_ls[-1]:
+                tmp_element = np.array([self.discrete_action_ls[-1], self.discrete_action_ls[-1]])
+            else:
+                for j in range(configs.CHANNEL_NUM - 1):
+                    if self.discrete_action_ls[j] <= raw_a[i] <= self.discrete_action_ls[j + 1]:
+                        tmp_element = np.array([self.discrete_action_ls[j], self.discrete_action_ls[j+1]])
+            if i == configs.CHANNEL_NUM:
+                action_element_list = tmp_element
+            else:
+                action_element_list = np.vstack((action_element_list, tmp_element))
+        print("action_element_list: ", action_element_list)
+        candidate_disc_a_ls = combination(action_element_list, 0)
+        print("candidate_disc_a_ls: ", candidate_disc_a_ls)
+        candidate_a_ls = np.zeros((len(candidate_disc_a_ls), configs.CHANNEL_NUM + configs.USER_NUM))
+        continuous_a_ls = raw_a[0:configs.CHANNEL_NUM]
+        for i in range(len(candidate_a_ls)):
+            candidate_a_ls[i] = np.hstack((continuous_a_ls, candidate_disc_a_ls[i]))
+
+        v_ls = np.zeros(len(candidate_a_ls))
+        for i in range(len(candidate_a_ls)):
+            v_ls[i] = self.critic.target_q(np.expand_dims(s, axis=0),
+                                           np.expand_dims(candidate_a_ls[i], axis=0))
+        best_a_key = 0
+        greatest_v = v_ls[0]
+        for i in range(len(candidate_disc_a_ls)):
+            if v_ls[i] >= greatest_v:
+                best_a_key = i
+                greatest_v = v_ls[i]
+        result_a = candidate_a_ls[best_a_key]
+        print("get_discrete_action")
+        print(raw_a, candidate_disc_a_ls, v_ls, result_a)
+        return result_a
 
     def policy_action(self, s):
         """ Use the actor to do an action with the state
         """
-        return self.actor.target_action(s)
+        a = self.actor.target_action(s)
+        a = self.get_discrete_action(s, a)
+        return a
 
     def bellman(self, rewards, q_values):
         """ Use the Bellman Equation to compute the critic target
@@ -69,7 +114,7 @@ class DDPG:
         # print("Gradient: ", grads)
 
         # Train actor
-        for e in range(3000):
+        for e in range(6000):
             actions_grad = self.actor.actions(states)
             q_grads = self.critic.gradients(states, actions_grad)
             self.actor.train(q_grads, states)
@@ -88,6 +133,21 @@ class DDPG:
         critic_target = self.bellman(rewards, q_values)
         # Train both networks on sampled batch, update target networks
         self.update_models(states, actions, critic_target)
+
+    def virtual_train(self, states, actions, rewards, new_states):
+        q_values = self.critic.target_q(new_states, self.actor.target_actions(new_states))
+        # Compute critic target
+        critic_target = self.bellman(rewards, q_values)
+
+        for episode in range(101):
+            self.critic.train(critic_target, states, actions)
+        # Train actor
+        for e in range(101):
+            actions_grad = self.actor.actions(states)
+            q_grads = self.critic.gradients(states, actions_grad)
+            self.actor.train(q_grads, states)
+        self.critic.update_target()
+        self.actor.update_target()
 
     def pre_train(self, states, actions, rewards, new_states):
         # Predict target q-values using target networks
