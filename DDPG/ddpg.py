@@ -126,7 +126,6 @@ class DDPG:
     def train(self):
         # Sample experience from buffer
         states, actions, rewards, new_states = self.sample_batch(configs.BATCH_SIZE)
-
         # Predict target q-values using target networks
         q_values = self.critic.target_q(new_states, self.actor.target_actions(new_states))
         # Compute critic target
@@ -134,18 +133,39 @@ class DDPG:
         # Train both networks on sampled batch, update target networks
         self.update_models(states, actions, critic_target)
 
+    def train_channel_selection(self):
+        # Sample experience from buffer
+        states, actions, rewards, new_states = self.sample_batch(configs.BATCH_SIZE)
+        # Predict target q-values using target networks
+        q_values = self.critic.target_q(new_states, self.actor.target_actions(new_states))
+        # Compute critic target
+        critic_target = self.bellman(rewards, q_values)
+        # Train critic
+        for e in range(3000):
+            self.critic.train(critic_target, states, actions)
+
+        # Train actor
+        for e in range(6000):
+            actions_grad = self.actor.actions(states)
+            q_grads = self.critic.gradients(states, actions_grad)
+            self.actor.train_channel_selection(q_grads, states)
+
+        # Transfer weights to target networks at rate Tau
+        self.actor.update_target()
+        self.critic.update_target()
+
     def virtual_train(self, states, actions, rewards, new_states):
         q_values = self.critic.target_q(new_states, self.actor.target_actions(new_states))
         # Compute critic target
         critic_target = self.bellman(rewards, q_values)
 
-        for episode in range(101):
+        for episode in range(11):
             self.critic.train(critic_target, states, actions)
         # Train actor
-        for e in range(101):
+        for e in range(11):
             actions_grad = self.actor.actions(states)
             q_grads = self.critic.gradients(states, actions_grad)
-            self.actor.train(q_grads, states)
+            self.actor.train_power_allocation(q_grads, states)
         self.critic.update_target()
         self.actor.update_target()
 
@@ -174,12 +194,11 @@ class DDPG:
         #         print("Pre-train actor:", episode)
         # self.actor.pre_train_target()
 
+    def save_session(self, path):
+        saver = tf.train.Saver()
+        save_path = saver.save(self.sess, path)
+        print("Save session to: ", save_path)
 
-    # def save_weights(self, path):
-    #     path += '_LR_{}'.format(self.lr)
-    #     self.actor.save(path)
-    #     self.critic.save(path)
-    #
     # def load_weights(self, path_actor, path_critic):
     #     self.critic.load_weights(path_critic)
     #     self.actor.load_weights(path_actor)

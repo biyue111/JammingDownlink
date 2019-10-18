@@ -27,7 +27,7 @@ class BSAgent:
         self.virtual_action_step = configs.VIRTUAL_ACTION_STEP
 
     def act(self, s, t):
-        fix_power_flag = 1
+        fix_power_flag = 0
         fix_channel_flag = 0
         # print("The state:" + str(s))
         a = self.brain.policy_action(s)
@@ -81,6 +81,10 @@ class BSAgent:
     def update_brain(self):
         if self.brain.buffer.count > configs.BATCH_SIZE:
             self.brain.train()
+
+    def update_brain_channel_selection(self):
+        if self.brain.buffer.count > configs.BATCH_SIZE:
+            self.brain.train_channel_selection()
 
     def virtual_update_brain(self, states, bs_actions, rewards, next_states):
         self.brain.virtual_train(states, bs_actions, rewards, next_states)
@@ -150,6 +154,9 @@ class BSAgent:
         print("Pre-train actor test: ", raw_a_t, a_t)
         v = self.brain.critic.target_q(np.expand_dims(s, axis=0), np.expand_dims(raw_a, axis=0))
         print("Pre-train actor test q-value: ", v)
+
+    def save_brain(self, path):
+        self.brain.save_session(path)
 
 
 # -------------------- JAMMER AGENT --------------------
@@ -262,7 +269,7 @@ class Environment:
             #     bs_agent.virtual_update_brain(v_old_states, bs_virtual_raw_actions, v_rewards, v_next_states)
 
             if e % 100 == 0:
-                bs_agent.update_brain()
+                bs_agent.update_brain_channel_selection()
 
             # Update current state
             old_state = new_state
@@ -280,6 +287,8 @@ class Environment:
             # tqdm_e.set_description("Actions:" + str(bs_a_ls) + "Reward: " + str(r))
             # tqdm_e.refresh()
 
+        # ---------- Save models ----------
+        bs_agent.save_brain("results/save_net.ckpt")
         # --------- Print results ---------
         bs_agent.critic_test(old_state, 'critic_test.csv')
         # Write reward and success rate to a csv file

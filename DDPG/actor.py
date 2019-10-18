@@ -26,6 +26,7 @@ class Actor:
         # Create network and target network
         self.state_input, self.action_output, \
         self.net = self.create_network(state_dim, action_dim)
+        self.channel_selection_net = self.net[0:6]
 
         self.target_state_input, self.target_action_output, \
         self.target_update, self.target_net = self.create_target_network(state_dim, action_dim, self.net)
@@ -40,6 +41,17 @@ class Actor:
         self.q_gradient_input = tf.placeholder("float", [None, self.action_dim])
         self.parameters_gradients = tf.gradients(self.action_output, self.net, -self.q_gradient_input)
         self.optimizer = tf.train.AdamOptimizer(self.lr).apply_gradients(zip(self.parameters_gradients, self.net))
+        # upper network (channel selection) optimizer
+        self.channel_selection_parameters_gradients = tf.gradients(self.action_output,
+                                                                   self.net[0:6], -self.q_gradient_input)
+        self.channel_selection_optimizer = \
+            tf.train.AdamOptimizer(self.lr).apply_gradients(zip(self.channel_selection_parameters_gradients, self.net[0:6]))
+
+        self.power_allocation_parameters_gradients = tf.gradients(self.action_output,
+                                                                  self.net[6:10], -self.q_gradient_input)
+        self.power_allocation_optimizer = \
+            tf.train.AdamOptimizer(self.lr).apply_gradients(zip(self.power_allocation_parameters_gradients, self.net[6:10]))
+        # lower network (power allocation) optimizer
         ## regularization l2norm
         # weight_decay = tf.add_n([1e-3 * tf.nn.l2_loss(var) for var in self.net])
         # self.regularizer = tf.train.AdamOptimizer(self.lr).minimize(weight_decay)
@@ -111,6 +123,16 @@ class Actor:
             self.q_gradient_input: q_gradient_batch,
             self.state_input: state_batch})
 
+    def train_channel_selection(self, q_gradient_batch, state_batch):
+        self.sess.run(self.channel_selection_optimizer, feed_dict={
+            self.q_gradient_input: q_gradient_batch,
+            self.state_input: state_batch})
+
+    def train_power_allocation(self, q_gradient_batch, state_batch):
+        self.sess.run(self.power_allocation_optimizer, feed_dict={
+            self.q_gradient_input: q_gradient_batch,
+            self.state_input: state_batch})
+
     def actions(self, state_batch):
         return self.sess.run(self.action_output, feed_dict={
                         self.state_input: state_batch})
@@ -126,12 +148,6 @@ class Actor:
     def target_action(self, state):
         return self.sess.run(self.target_action_output, feed_dict={
             self.target_state_input: [state]})[0]
-
-    # def save(self, path):
-    #     self.model.save_weights(path + '_actor.h5')
-    #
-    # def load_weights(self, path):
-    #     self.model.load_weights(path)
 
     # f fan-in size
     def variable(self, shape, f):
