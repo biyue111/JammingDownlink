@@ -18,7 +18,7 @@ class DDPG:
     Mainly refer to the code of @germain-hug
     """
 
-    def __init__(self, act_dim, env_dim, act_range, buffer_size=600, gamma=0.0, lr=0.001, tau=0.05):
+    def __init__(self, act_dim, env_dim, act_range, buffer_size=600, gamma=0.0, lr=0.01, tau=0.3):
         """ Initialization
         """
         # Environment and A2C parameters
@@ -29,12 +29,11 @@ class DDPG:
         self.lr = lr
         self.sess = tf.InteractiveSession()
         # Create actor and critic networks
-        self.actor = Actor(self.sess, self.state_dim, self.act_dim, act_range, lr * 0.1, tau)
-        self.critic = Critic(self.sess, self.state_dim, self.act_dim, lr, tau)
+        self.actor = Actor(self.sess, self.state_dim, self.act_dim, act_range, lr * 0.1, tau_in=1.0)
+        self.critic = Critic(self.sess, self.state_dim, self.act_dim, lr, tau_in=0.3)
         self.buffer = AgentBuffer(buffer_size)
         action_step = 2.0 / (configs.CHANNEL_NUM * 1.0)
         self.discrete_action_ls = np.arange(-1.0 + 0.1*action_step, 1.0, action_step)
-        print("discrete_action_ls: ", self.discrete_action_ls)
 
     def get_discrete_action(self, s, raw_a):
         # Get discrete action with Wolpertinger Policy
@@ -52,9 +51,9 @@ class DDPG:
                 action_element_list = tmp_element
             else:
                 action_element_list = np.vstack((action_element_list, tmp_element))
-        print("action_element_list: ", action_element_list)
+        # print("action_element_list: ", action_element_list)
         candidate_disc_a_ls = combination(action_element_list, 0)
-        print("candidate_disc_a_ls: ", candidate_disc_a_ls)
+        # print("candidate_disc_a_ls: ", candidate_disc_a_ls)
         candidate_a_ls = np.zeros((len(candidate_disc_a_ls), configs.CHANNEL_NUM + configs.USER_NUM))
         continuous_a_ls = raw_a[0:configs.CHANNEL_NUM]
         for i in range(len(candidate_a_ls)):
@@ -71,8 +70,8 @@ class DDPG:
                 best_a_key = i
                 greatest_v = v_ls[i]
         result_a = candidate_a_ls[best_a_key]
-        print("get_discrete_action")
-        print(raw_a, candidate_disc_a_ls, v_ls, result_a)
+        # print("get_discrete_action")
+        # print(raw_a, candidate_disc_a_ls, v_ls, result_a)
         return result_a
 
     def policy_action(self, s):
@@ -141,8 +140,12 @@ class DDPG:
         # Compute critic target
         critic_target = self.bellman(rewards, q_values)
         # Train critic
+        losses = []
         for e in range(3000):
-            self.critic.train(critic_target, states, actions)
+            loss = self.critic.train(critic_target, states, actions)
+            if (e + 1) % 60 == 0:
+                losses.append(loss)
+        print("Losses: ", losses)
 
         # Train actor
         for e in range(6000):
@@ -159,15 +162,15 @@ class DDPG:
         # Compute critic target
         critic_target = self.bellman(rewards, q_values)
 
-        for episode in range(11):
+        for episode in range(5):
             self.critic.train(critic_target, states, actions)
         # Train actor
-        for e in range(11):
+        for e in range(5):
             actions_grad = self.actor.actions(states)
             q_grads = self.critic.gradients(states, actions_grad)
             self.actor.train_power_allocation(q_grads, states)
-        self.critic.update_target()
-        self.actor.update_target()
+        # self.critic.update_target()
+        # self.actor.update_target()
 
     def pre_train(self, states, actions, rewards, new_states):
         # Predict target q-values using target networks
@@ -198,6 +201,10 @@ class DDPG:
         saver = tf.train.Saver()
         save_path = saver.save(self.sess, path)
         print("Save session to: ", save_path)
+
+    def load_session(self, path):
+        saver = tf.train.Saver()
+        saver.restore(self.sess, path)
 
     # def load_weights(self, path_actor, path_critic):
     #     self.critic.load_weights(path_critic)

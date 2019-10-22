@@ -3,15 +3,9 @@ import tensorflow as tf
 import math as math
 import configs
 
-# import keras.backend as K
-# from keras.initializers import RandomUniform
-# from keras.models import Model
-# from keras.layers import Input, Dense, Reshape, LSTM, Lambda, BatchNormalization, GaussianNoise, Flatten
-
 
 class Actor:
-    """ Actor Network for the DDPG Algorithm
-    """
+    """ Actor Network for the DDPG Algorithm"""
 
     def __init__(self, sess, state_dim, action_dim, act_range, lr, tau_in):
         # self.env_dim = inp_dim

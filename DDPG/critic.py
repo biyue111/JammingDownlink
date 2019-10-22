@@ -39,7 +39,8 @@ class Critic:
         L2 = 0.001
         self.v_input = tf.placeholder("float", [None, 1])
         weight_decay = tf.add_n([L2 * tf.nn.l2_loss(var) for var in self.net])
-        self.cost = tf.reduce_mean(tf.square(self.v_input - self.q_value_output)) + weight_decay
+        self.loss = tf.reduce_mean(tf.square(self.v_input - self.q_value_output))
+        self.cost = self.loss + weight_decay
         self.optimizer = tf.train.AdamOptimizer(self.lr).minimize(self.cost)
         self.action_gradients = tf.gradients(self.q_value_output, self.action_input)
 
@@ -48,7 +49,7 @@ class Critic:
         """
         layer1_size = 100
         layer2_size = 50
-        layer3_size = 25
+        layer3_size = 50
 
         state_input = tf.placeholder("float", [None, state_dim])
         action_input = tf.placeholder("float", [None, action_dim])
@@ -87,17 +88,21 @@ class Critic:
 
     def update_target(self):
         self.sess.run(self.target_update, feed_dict={
-            self.tau: self.tau_in
+            self.tau: 1.0
         })
 
     def pre_train_target(self):
         self.sess.run(self.target_update, feed_dict={
-            self.tau: 1.0
+            self.tau: self.tau_in
         })
 
     def train(self, v_batch, state_batch, action_batch):
         self.time_step += 1
         self.sess.run(self.optimizer, feed_dict={
+            self.v_input: v_batch,
+            self.state_input: state_batch,
+            self.action_input: action_batch})
+        return self.sess.run(self.loss, feed_dict={
             self.v_input: v_batch,
             self.state_input: state_batch,
             self.action_input: action_batch})
