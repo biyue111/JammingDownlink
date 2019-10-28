@@ -3,7 +3,7 @@ import math
 
 # General configs
 CHANNEL_NUM = 3
-UPDATE_NUM = 1500
+UPDATE_NUM = 2000
 SINR_THRESHOLD = 0.5
 
 # BS  and users common configs

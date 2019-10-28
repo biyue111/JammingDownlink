@@ -7,24 +7,24 @@ import csv
 
 # -------------------- BS agent ------------------------
 class BSAgent:
-    def __init__(self, act_range):
+    def __init__(self, act_range, act_dim, state_dim):
         # Create a ddpg network with
         # actions: [power allocation in each channel, channel chosen for each user]
         # states: [user position (x, y), channel chosen, data_rate] * number of user
         # action range: [0, 1]
         self.max_power = configs.BS_MAX_POWER
         self.act_range = act_range
-        self.act_dim = configs.CHANNEL_NUM + configs.USER_NUM
+        self.act_dim = act_dim
         channel_step = 2.0 / (configs.CHANNEL_NUM * 1.0)
         self.channel_raw_action_ls = np.arange(-1.0 + 0.1 * channel_step, 1.0, channel_step)
-        self.state_dim = 4 * configs.USER_NUM
+        self.state_dim = state_dim
         # print(self.act_dim, self.state_dim)
         self.brain = DDPG(self.act_dim, self.state_dim, act_range)
         self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim, n_steps_annealing=800)
         self.virtual_action_step = configs.VIRTUAL_ACTION_STEP
 
     def act(self, s, t):
-        fix_power_flag = 1
+        fix_power_flag = 0
         fix_channel_flag = 0
         # print("The state:" + str(s))
         print("## BS station action ##")
@@ -154,6 +154,7 @@ class BSAgent:
     def load_brain(self, path):
         self.brain.load_session(path)
 
+
 # -------------------- JAMMER AGENT --------------------
 class JMRAgent:
     def __init__(self):
@@ -161,7 +162,9 @@ class JMRAgent:
 
     def act(self, s, t):
         a = np.zeros(configs.CHANNEL_NUM)
-        jammed_channel = t % configs.CHANNEL_NUM
+        jammed_channel = t % configs.CHANNEL_NUM  # 3-phase jammer
+        # jammed_channel = t % (configs.CHANNEL_NUM - 1)  # 2-phase jammer
+        # jammed_channel = 0  # fixed jammer
         a[jammed_channel] = 1.0
         a = a * self.power * 10
         print("Jammer's action: ", a)

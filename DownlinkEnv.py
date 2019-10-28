@@ -11,22 +11,29 @@ class DownlinkEnv:
         self.sinr_threshold = configs.SINR_THRESHOLD  # if higher than that, this channel is occupied by jammer
 
     def get_init_state(self):
-        s = np.zeros(4 * self.user_num)
-        # Write user's position (x, y), channel chosen and data rate to the state
-        for i in range(self. user_num):
-            s[i*4] = self.user_positions[i][0]
-            s[i*4 + 1] = self.user_positions[i][1]
-            s[i * 4 + 2] = self.channel_num - 1
+        ini_jammer_ch = np.zeros(self.channel_num)
+        r = np.zeros(self.user_num)
+        ini_ch = [(self.channel_num - 1) for _ in range(self.user_num)]
+        s = self.generate_state(ini_jammer_ch, r, ini_ch)
         return s
 
-    def generate_state(self, ch, r):
-        s = np.zeros(4 * self.user_num)
+    def generate_state(self, jammer_ch, ch, r):
+        s = np.zeros(self.channel_num + 4 * self.user_num)
+        # Write jammer jammed channel
+        i = 0
+        for j in range(self.channel_num):
+            s[i] = jammer_ch[j]
+            i += 1
         # Write user's position (x, y), channel chosen and data rate to the state
-        for i in range(self. user_num):
-            s[i*4] = self.user_positions[i][0]
-            s[i*4 + 1] = self.user_positions[i][1]
-            s[i*4 + 2] = ch[i]
-            s[i*4 + 3] = r[i]
+        for j in range(self.user_num):
+            s[i] = self.user_positions[j][0]
+            i += 1
+            s[i] = self.user_positions[j][1]
+            i += 1
+            s[i] = ch[j]
+            i += 1
+            s[i] = r[j]
+            i += 1
         return s
 
     def calculate_bs_reward(self, bs_power_allocation, user_channel_ls, jammer_power_allocation):
@@ -92,6 +99,6 @@ class DownlinkEnv:
         user_channel_ls = bs_action_ls[1]
 
         jammed_flag, reward, datarate_ls = self.calculate_bs_reward(bs_power_allocation, user_channel_ls, jammer_power_allocation)
-        s_ = self.generate_state(user_channel_ls, datarate_ls)
+        s_ = self.generate_state(jammer_power_allocation, user_channel_ls, datarate_ls)
 
         return jammed_flag, reward, s_

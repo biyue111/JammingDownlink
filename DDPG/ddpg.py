@@ -30,7 +30,7 @@ class DDPG:
         self.sess = tf.InteractiveSession()
         # Create actor and critic networks
         self.actor = Actor(self.sess, self.state_dim, self.act_dim, act_range, lr * 0.1, tau_in=1.0)
-        self.critic = Critic(self.sess, self.state_dim, self.act_dim, lr, tau_in=0.3)
+        self.critic = Critic(self.sess, self.state_dim, self.act_dim, lr, tau_in=0.5)
         self.buffer = AgentBuffer(buffer_size)
         action_step = 2.0 / (configs.CHANNEL_NUM * 1.0)
         self.discrete_action_ls = np.arange(-1.0 + 0.1*action_step, 1.0, action_step)
@@ -141,7 +141,7 @@ class DDPG:
         critic_target = self.bellman(rewards, q_values)
         # Train critic
         losses = []
-        for e in range(3000):
+        for e in range(6000):
             loss = self.critic.train(critic_target, states, actions)
             if (e + 1) % 60 == 0:
                 losses.append(loss)
