@@ -2,12 +2,6 @@ import numpy as np
 import tensorflow as tf
 import math as math
 
-# import keras.backend as K
-# from keras.initializers import RandomUniform
-# from keras.models import Model
-# from keras.optimizers import Adam
-# from keras.layers import Input, Dense, concatenate, LSTM, Reshape, BatchNormalization, Lambda, Flatten
-
 
 class Critic:
     """ Critic for the DDPG Algorithm, Q-Value function approximator
@@ -25,6 +19,10 @@ class Critic:
         # Build models and target models
         self.state_input, self.action_input, \
         self.q_value_output, self.net = self.create_q_network(state_dim, action_dim)
+        self.action_net = [self.net[0], self.net[1], self.net[2], self.net[3]]
+        self.state_net = [self.net[4], self.net[5], self.net[6], self.net[7]]
+        self.combined_net = [self.net[8], self.net[9], self.net[10], self.net[11],
+                             self.net[12], self.net[13], self.net[14]]
 
         self.target_state_input, self.target_action_input, \
         self.target_q_value_output, self.target_update, \
@@ -42,33 +40,51 @@ class Critic:
         self.loss = tf.reduce_mean(tf.square(self.v_input - self.q_value_output))
         self.cost = self.loss + weight_decay
         self.optimizer = tf.train.AdamOptimizer(self.lr).minimize(self.cost)
+        action_com_var_list = self.action_net + [self.net[13], self.net[14]]
+        self.optimizer_action_com = tf.train.AdamOptimizer(self.lr).minimize(self.cost, var_list=action_com_var_list)
+        state_com_var_list = self.state_net + self.combined_net
+        self.optimizer_state_com = tf.train.AdamOptimizer(self.lr).minimize(self.cost, var_list=state_com_var_list)
         self.action_gradients = tf.gradients(self.q_value_output, self.action_input)
 
     def create_q_network(self, state_dim, action_dim):
         """ Assemble Critic network to predict q-values
         """
-        layer1_size = 100
-        layer2_size = 50
-        layer3_size = 50
+        a_layer1_size = 100
+        a_layer2_size = 50
+        s_layer1_size = 100
+        s_layer2_size = 50
+        combined_layer1_size = 100
+        combined_layer2_size = 100
 
         state_input = tf.placeholder("float", [None, state_dim])
         action_input = tf.placeholder("float", [None, action_dim])
-        W1 = self.variable([state_dim, layer1_size], state_dim)
-        b1 = self.variable([layer1_size], state_dim)
-        W2 = self.variable([layer1_size, layer2_size], layer1_size + action_dim)
-        W2_action = self.variable([action_dim, layer2_size], layer1_size + action_dim)
-        b2 = self.variable([layer2_size], layer1_size + action_dim)
-        W3 = tf.Variable(tf.random_uniform([layer2_size, layer3_size], -3e-3, 3e-3))
-        b3 = tf.Variable(tf.random_uniform([layer3_size], -3e-3, 3e-3))
-        W4 = tf.Variable(tf.random_uniform([layer3_size, 1], -3e-3, 3e-3))
-        b4 = tf.Variable(tf.random_uniform([1], -3e-3, 3e-3))
+        a_W1 = self.variable([action_dim, a_layer1_size], action_dim)
+        a_b1 = self.variable([a_layer1_size], action_dim)
+        a_W2 = self.variable([a_layer1_size, a_layer2_size], a_layer1_size)
+        a_b2 = self.variable([a_layer2_size], a_layer1_size)
+        s_W1 = self.variable([state_dim, s_layer1_size], state_dim)
+        s_b1 = self.variable([s_layer1_size], state_dim)
+        s_W2 = tf.Variable(tf.random_uniform([s_layer1_size, s_layer2_size], -3e-5, 3e-5))
+        s_b2 = tf.Variable(tf.random_uniform([s_layer2_size], -3e-5))
 
-        layer1 = tf.nn.relu(tf.matmul(state_input, W1) + b1)
-        layer2 = tf.nn.relu(tf.matmul(layer1, W2) + tf.matmul(action_input, W2_action) + b2)
-        layer3 = tf.nn.relu(tf.matmul(layer2, W3) + b3)
-        q_value_output = tf.identity(tf.matmul(layer3, W4) + b4)
+        W1_action = tf.Variable(tf.eye(a_layer2_size, num_columns=combined_layer1_size))
+        W1_state = tf.Variable(tf.zeros([s_layer2_size, combined_layer1_size]))
+        b1 = tf.Variable(tf.zeros([combined_layer1_size]))
+        W2 = tf.Variable(tf.eye(combined_layer1_size, num_columns=combined_layer2_size))
+        b2 = tf.Variable(tf.zeros([combined_layer2_size]))
+        W3 = tf.Variable(tf.random_uniform([combined_layer2_size, 1], -3e-3, 3e-3))
+        b3 = tf.Variable(tf.random_uniform([1], -3e-3, 3e-3))
 
-        return state_input, action_input, q_value_output, [W1, b1, W2, W2_action, b2, W3, b3, W4, b4]
+        a_layer1 = tf.nn.relu(tf.matmul(action_input, a_W1) + a_b1)
+        a_layer2 = tf.nn.relu(tf.matmul(a_layer1, a_W2) + a_b2)
+        s_layer1 = tf.nn.relu(tf.matmul(state_input, s_W1) + s_b1)
+        s_layer2 = tf.nn.relu(tf.matmul(s_layer1, s_W2) + s_b2)
+        combined_layer1 = tf.nn.relu(tf.matmul(a_layer2, W1_action) + tf.matmul(s_layer2, W1_state) + b1)
+        combined_layer2 = tf.nn.relu(tf.matmul(combined_layer1, W2) + b2)
+        q_value_output = tf.identity(tf.matmul(combined_layer2, W3) + b3)
+
+        return state_input, action_input, q_value_output, [a_W1, a_b1, a_W2, a_b2, s_W1, s_b1, s_W2, s_b2,
+                                                           W1_action, W1_state, b1, W2, b2, W3, b3]
 
     def create_target_q_network(self, state_dim, action_dim, net):
         state_input = tf.placeholder("float", [None, state_dim])
@@ -79,22 +95,48 @@ class Critic:
         target_update = ema.apply(net)
         target_net = [ema.average(x) for x in net]
 
-        layer1 = tf.nn.relu(tf.matmul(state_input, target_net[0]) + target_net[1])
-        layer2 = tf.nn.relu(tf.matmul(layer1, target_net[2]) + tf.matmul(action_input, target_net[3]) + target_net[4])
-        layer3 = tf.nn.relu(tf.matmul(layer2, target_net[5]) + target_net[6])
-        q_value_output = tf.identity(tf.matmul(layer3, target_net[7]) + target_net[8])
+        a_layer1 = tf.nn.relu(tf.matmul(action_input, target_net[0]) + target_net[1])
+        a_layer2 = tf.nn.relu(tf.matmul(a_layer1, target_net[2]) + target_net[3])
+        s_layer1 = tf.nn.relu(tf.matmul(state_input, target_net[4]) + target_net[5])
+        s_layer2 = tf.nn.relu(tf.matmul(s_layer1, target_net[6]) + target_net[7])
+        combined_layer1 = tf.nn.relu(tf.matmul(a_layer2, target_net[8]) +
+                                     tf.matmul(s_layer2, target_net[9]) + target_net[10])
+        combined_layer2 = tf.nn.relu(tf.matmul(combined_layer1, target_net[11]) + target_net[12])
+        q_value_output = tf.identity(tf.matmul(combined_layer2, target_net[13]) + target_net[14])
 
         return state_input, action_input, q_value_output, target_update, target_net
 
     def update_target(self):
         self.sess.run(self.target_update, feed_dict={
-            self.tau: 1.0
+            self.tau: self.tau_in
         })
 
     def pre_train_target(self):
         self.sess.run(self.target_update, feed_dict={
-            self.tau: self.tau_in
+            self.tau: 1.0
         })
+
+    def train_action_com(self, v_batch, state_batch, action_batch):
+        self.sess.run(self.optimizer_action_com, feed_dict={
+            self.v_input: v_batch,
+            self.state_input: state_batch,
+            self.action_input: action_batch})
+        # return the loss
+        return self.sess.run(self.loss, feed_dict={
+            self.v_input: v_batch,
+            self.state_input: state_batch,
+            self.action_input: action_batch})
+
+    def train_state_com(self, v_batch, state_batch, action_batch):
+        self.sess.run(self.optimizer_state_com, feed_dict={
+            self.v_input: v_batch,
+            self.state_input: state_batch,
+            self.action_input: action_batch})
+        # return the loss
+        return self.sess.run(self.loss, feed_dict={
+            self.v_input: v_batch,
+            self.state_input: state_batch,
+            self.action_input: action_batch})
 
     def train(self, v_batch, state_batch, action_batch):
         self.time_step += 1
@@ -102,6 +144,7 @@ class Critic:
             self.v_input: v_batch,
             self.state_input: state_batch,
             self.action_input: action_batch})
+        # return the loss
         return self.sess.run(self.loss, feed_dict={
             self.v_input: v_batch,
             self.state_input: state_batch,

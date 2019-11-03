@@ -24,6 +24,7 @@ class Actor:
 
         self.target_state_input, self.target_action_output, \
         self.target_update, self.target_net = self.create_target_network(state_dim, action_dim, self.net)
+        self.init_actor = tf.initialize_variables(self.net)
 
         self.create_training_method()
 
@@ -101,6 +102,9 @@ class Actor:
         action_output = tf.concat([action_energy, action_channel], axis=1)
 
         return state_input, action_output, target_update, target_net
+
+    def initial_net(self):
+        self.sess.run(self.init_actor)
 
     def update_target(self):
         self.sess.run(self.target_update, feed_dict={

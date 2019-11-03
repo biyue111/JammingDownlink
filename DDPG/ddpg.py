@@ -32,21 +32,13 @@ class DDPG:
         self.actor = Actor(self.sess, self.state_dim, self.act_dim, act_range, lr * 0.1, tau_in=1.0)
         self.critic = Critic(self.sess, self.state_dim, self.act_dim, lr, tau_in=0.5)
         self.buffer = AgentBuffer(buffer_size)
-        action_step = 2.0 / (configs.CHANNEL_NUM * 1.0)
-        self.discrete_action_ls = np.arange(-1.0 + 0.1*action_step, 1.0, action_step)
+        self.discrete_action_ls = configs.RAW_CHANNEL_LIST
 
     def get_discrete_action(self, s, raw_a):
         # Get discrete action with Wolpertinger Policy
         action_element_list = np.array([])
         for i in range(configs.CHANNEL_NUM, configs.CHANNEL_NUM + configs.USER_NUM):
-            if raw_a[i] < self.discrete_action_ls[0]:
-                tmp_element = np.array([self.discrete_action_ls[0], self.discrete_action_ls[0]])
-            elif raw_a[i] > self.discrete_action_ls[-1]:
-                tmp_element = np.array([self.discrete_action_ls[-1], self.discrete_action_ls[-1]])
-            else:
-                for j in range(configs.CHANNEL_NUM - 1):
-                    if self.discrete_action_ls[j] <= raw_a[i] <= self.discrete_action_ls[j + 1]:
-                        tmp_element = np.array([self.discrete_action_ls[j], self.discrete_action_ls[j+1]])
+            tmp_element = raw_channel_to_2raw_channels(raw_a[i])
             if i == configs.CHANNEL_NUM:
                 action_element_list = tmp_element
             else:
@@ -132,7 +124,7 @@ class DDPG:
         # Train both networks on sampled batch, update target networks
         self.update_models(states, actions, critic_target)
 
-    def train_channel_selection(self):
+    def train_channel_selection_transfer(self):
         # Sample experience from buffer
         states, actions, rewards, new_states = self.sample_batch(configs.BATCH_SIZE)
         # Predict target q-values using target networks
@@ -141,21 +133,35 @@ class DDPG:
         critic_target = self.bellman(rewards, q_values)
         # Train critic
         losses = []
-        for e in range(6000):
-            loss = self.critic.train(critic_target, states, actions)
-            if (e + 1) % 60 == 0:
-                losses.append(loss)
-        print("Losses: ", losses)
+        for e in range(8000):
+            loss = self.critic.train_state_com(critic_target, states, actions)
+            if (e + 1) % 1000 == 0:
+                # losses.append(loss)
+                print("The loss of critic: ", loss)
+        self.critic.update_target()
+
+        print("critic target test:------------")
+        t_q_values = self.critic.target_q(states, actions)
+        for i in range(len(actions)):
+            delta = t_q_values[i] - rewards[i]
+            if delta >= 3.0:
+                print([round(k, 2) for k in states[i]],
+                      [round(k, 2) for k in actions[i]],
+                      round(critic_target[i][0], 2),
+                      round(t_q_values[i][0], 2))
 
         # Train actor
-        for e in range(6000):
+        self.actor.initial_net()
+        for e in range(1000):
             actions_grad = self.actor.actions(states)
+            if (e + 1) % 200 == 0:
+                # losses.append(loss)
+                print("Episod: ", e+1, " 1st action: ", [round(i, 4) for i in actions_grad[0]])
             q_grads = self.critic.gradients(states, actions_grad)
             self.actor.train_channel_selection(q_grads, states)
 
         # Transfer weights to target networks at rate Tau
         self.actor.update_target()
-        self.critic.update_target()
 
     def virtual_train(self, states, actions, rewards, new_states):
         q_values = self.critic.target_q(new_states, self.actor.target_actions(new_states))
@@ -178,24 +184,38 @@ class DDPG:
         # Compute critic target
         critic_target = self.bellman(rewards, q_values)
 
-        print("Pre-train---------------------------------------")
-        for i in range(len(critic_target)):
-            print(states[i], actions[i], critic_target[i])
-        print("===================================================")
-        for episode in range(8001):
-            self.critic.train(critic_target, states, actions)
+        print("DDPG: Pre-train-------------------------------------")
+        print("Pre-train input data list:")
+        print("Data list length: ", len(actions))
+        for i in range(len(actions)):
+            print([round(k, 2) for k in states[i]],
+                  [round(k, 2) for k in actions[i]],
+                  round(critic_target[i][0], 2))
+        print("DDPG: Begin pre-train critic network:")
+        for episode in range(5001):
+            loss = self.critic.train_action_com(critic_target, states, actions)
             if episode % 1000 == 0:
-                print("Pre-train critic:", episode)
+                print("Pre-train critic:", episode, " loss: ", loss)
         self.critic.pre_train_target()
-
-        # Q-Value Gradients under Current Policy
-        # for episode in range(10001):
-        #     actions_grad = self.actor.actions(states)
-        #     q_grads = self.critic.gradients(states, actions_grad)
-        #     self.actor.train(q_grads, states)
-        #     if episode % 1000 == 0:
-        #         print("Pre-train actor:", episode)
-        # self.actor.pre_train_target()
+        t_qs = self.critic.target_q(states, actions)
+        print("Pre-trained target Q -------------------------------")
+        for i in range(len(actions)):
+            delta = t_qs[i][0] - critic_target[i][0]
+            if delta >= 2.0:
+                print([round(k, 2) for k in states[i]],
+                      [round(k, 2) for k in actions[i]],
+                      round(critic_target[i][0], 2),
+                      round(t_qs[i][0], 2))
+        print("===================================================")
+        # Pre-train actor
+        for e in range(500):
+            actions_grad = self.actor.actions(states)
+            if e % 100 == 0:
+                # losses.append(loss)
+                print("Episod: ", e+1, " 1st action: ", [round(i, 4) for i in actions_grad[0]])
+            q_grads = self.critic.gradients(states, actions_grad)
+            self.actor.train_channel_selection(q_grads, states)
+        self.actor.pre_train_target()
 
     def save_session(self, path):
         saver = tf.train.Saver()

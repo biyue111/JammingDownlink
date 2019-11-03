@@ -15,16 +15,15 @@ class BSAgent:
         self.max_power = configs.BS_MAX_POWER
         self.act_range = act_range
         self.act_dim = act_dim
-        channel_step = 2.0 / (configs.CHANNEL_NUM * 1.0)
-        self.channel_raw_action_ls = np.arange(-1.0 + 0.1 * channel_step, 1.0, channel_step)
+        self.channel_raw_action_ls = configs.RAW_CHANNEL_LIST
         self.state_dim = state_dim
         # print(self.act_dim, self.state_dim)
         self.brain = DDPG(self.act_dim, self.state_dim, act_range)
-        self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim, n_steps_annealing=800)
+        self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim, n_steps_annealing=400)
         self.virtual_action_step = configs.VIRTUAL_ACTION_STEP
 
     def act(self, s, t):
-        fix_power_flag = 0
+        fix_power_flag = 1
         fix_channel_flag = 0
         # print("The state:" + str(s))
         print("## BS station action ##")
@@ -45,7 +44,7 @@ class BSAgent:
         # ------- Fix action -------
         if fix_power_flag == 1:
             for i in range(configs.CHANNEL_NUM):
-                a[i] = 0.5
+                a[i] = 1.0
         if fix_channel_flag == 1:
             step = 2.0 / (configs.CHANNEL_NUM * 1.0 - 1.0)
             action_value = -1.0
@@ -66,15 +65,16 @@ class BSAgent:
         # Normalization
         raw_power_allocation = [(raw_power_allocation[i] + self.act_range) / (2 * self.act_range)
                                 for i in range(configs.CHANNEL_NUM)]
-        raw_user_channel_ls = [(raw_user_channel_ls[i] + self.act_range) / (2 * self.act_range)
-                               for i in range(configs.USER_NUM)]
+        # raw_user_channel_ls = [(raw_user_channel_ls[i] + self.act_range) / (2 * self.act_range)
+        #                        for i in range(configs.USER_NUM)]
         # Calculate the meaningful action (power and channel chosen)
         if sum(raw_power_allocation) == 0:
             power_allocation_ls = [self.max_power / configs.CHANNEL_NUM for _ in range(configs.CHANNEL_NUM)]
         else:
             power_allocation_ls = [raw_power_allocation[i] * self.max_power / sum(raw_power_allocation)
                                    for i in range(configs.CHANNEL_NUM)]
-        user_channel_ls = [math.floor(raw_user_channel_ls[i] * configs.CHANNEL_NUM) for i in range(configs.USER_NUM)]
+        user_channel_ls = [raw_channel_to_channel(raw_user_channel_ls[i]) for i in range(configs.USER_NUM)]
+        # print("[Test] raw_user_channel_ls, user_channel_ls", raw_user_channel_ls, user_channel_ls)
         for i in range(configs.USER_NUM):
             if user_channel_ls[i] >= configs.CHANNEL_NUM:
                 user_channel_ls[i] = configs.CHANNEL_NUM - 1
@@ -86,7 +86,7 @@ class BSAgent:
 
     def update_brain_channel_selection(self):
         if self.brain.buffer.count > configs.BATCH_SIZE:
-            self.brain.train_channel_selection()
+            self.brain.train_channel_selection_transfer()
 
     def virtual_update_brain(self, states, bs_actions, rewards, next_states):
         self.brain.virtual_train(states, bs_actions, rewards, next_states)
@@ -97,6 +97,7 @@ class BSAgent:
     def pre_train(self, states, bs_actions, rewards):
         # Generate pre-train data
         self.brain.pre_train(states, bs_actions, rewards, states)
+        self.actor_test(states[0])
 
     def get_virtual_actions(self, real_raw_action):
         # Generate virtual actions
@@ -162,10 +163,10 @@ class JMRAgent:
 
     def act(self, s, t):
         a = np.zeros(configs.CHANNEL_NUM)
-        jammed_channel = t % configs.CHANNEL_NUM  # 3-phase jammer
-        # jammed_channel = t % (configs.CHANNEL_NUM - 1)  # 2-phase jammer
+        # jammed_channel = t % configs.CHANNEL_NUM  # 3-phase jammer
+        jammed_channel = t % (configs.CHANNEL_NUM - 1)  # 2-phase jammer
         # jammed_channel = 0  # fixed jammer
         a[jammed_channel] = 1.0
-        a = a * self.power * 10
+        a = a * self.power
         print("Jammer's action: ", a)
         return a
