@@ -64,7 +64,6 @@ class Environment:
             jmr_a_ls = jmr_agent.act(old_state, e)
 
             # Retrieve new state, reward, and whether the state is terminal
-            print([bs_a_ls, jmr_a_ls])
             jammed_flag, r, new_state = self.env.step([bs_a_ls, jmr_a_ls])
             jammed_flag_list[e] = jammed_flag
             reward_list[e] = r
@@ -72,13 +71,21 @@ class Environment:
             power_allocation_records[e] = bs_a_ls[0]
             user_channel_choosing_records[e] = bs_a_ls[1]
 
+            # Show actions
+            records[e] = r
+            info_color = "0;32m"
+            print("\033["+info_color+"[Info] Jammer action: \033[0m", jmr_a_ls)
+            print("\033["+info_color+"[Info] BS Raw actions: \033[0m", [round(k, 4) for k in bs_raw_a_ls])
+            print("\033["+info_color+"[Info] BS Actions: \033[0m" + str(bs_a_ls))
+            print("\033["+info_color+"[Info] Reward: \033[0m" + str(r))
             # Add outputs to memory buffer
             if e > 0:
-                if bs_agent.brain.buffer.count < bs_agent.brain.buffer.buffer_size or e % 2 == 0:
+                if bs_agent.brain.buffer.count < bs_agent.brain.buffer.buffer_size or e % 1 == 0:
                     bs_agent.memorize(old_state, bs_raw_a_ls, r, new_state)
+                bs_agent.brain.last_10_buffer.memorize(old_state, bs_raw_a_ls, r, new_state)
 
             """ Update using virtual data """
-            if e > 901:
+            if e > 701:
                 bs_virtual_raw_actions = bs_agent.get_virtual_actions(bs_raw_a_ls)
                 v_rewards = np.zeros(len(bs_virtual_raw_actions))
                 v_old_states = np.zeros((len(bs_virtual_raw_actions), bs_agent.state_dim))
@@ -94,11 +101,6 @@ class Environment:
             # Update current state
             old_state = new_state
 
-            # Show results
-            records[e] = r
-            print("Raw actions: ", bs_raw_a_ls)
-            print("Actions: " + str(bs_a_ls))
-            print("Reward: " + str(r))
         print("BS station buffer")
         bs_agent.brain.buffer.print_buffer()
         # ---------- Save models ----------

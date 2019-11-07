@@ -18,7 +18,7 @@ class DDPG:
     Mainly refer to the code of @germain-hug
     """
 
-    def __init__(self, act_dim, env_dim, act_range, buffer_size=600, gamma=0.0, lr=0.01, tau=0.3):
+    def __init__(self, act_dim, env_dim, act_range, buffer_size=600, gamma=0.0, lr=0.001, tau=0.3):
         """ Initialization
         """
         # Environment and A2C parameters
@@ -30,8 +30,9 @@ class DDPG:
         self.sess = tf.InteractiveSession()
         # Create actor and critic networks
         self.actor = Actor(self.sess, self.state_dim, self.act_dim, act_range, lr * 0.1, tau_in=1.0)
-        self.critic = Critic(self.sess, self.state_dim, self.act_dim, lr, tau_in=0.5)
+        self.critic = Critic(self.sess, self.state_dim, self.act_dim, lr, tau_in=1.0)
         self.buffer = AgentBuffer(buffer_size)
+        self.last_10_buffer = AgentBuffer(10)
         self.discrete_action_ls = configs.RAW_CHANNEL_LIST
 
     def get_discrete_action(self, s, raw_a):
@@ -133,9 +134,9 @@ class DDPG:
         critic_target = self.bellman(rewards, q_values)
         # Train critic
         losses = []
-        for e in range(8000):
+        for e in range(1000):
             loss = self.critic.train_state_com(critic_target, states, actions)
-            if (e + 1) % 1000 == 0:
+            if e % 200 == 0:
                 # losses.append(loss)
                 print("The loss of critic: ", loss)
         self.critic.update_target()
@@ -144,24 +145,30 @@ class DDPG:
         t_q_values = self.critic.target_q(states, actions)
         for i in range(len(actions)):
             delta = t_q_values[i] - rewards[i]
-            if delta >= 3.0:
+            if delta >= 2.0:
                 print([round(k, 2) for k in states[i]],
                       [round(k, 2) for k in actions[i]],
                       round(critic_target[i][0], 2),
                       round(t_q_values[i][0], 2))
 
         # Train actor
-        self.actor.initial_net()
-        for e in range(1000):
+        self.actor.initial_channel_selection_net()
+        for e in range(500):
             actions_grad = self.actor.actions(states)
-            if (e + 1) % 200 == 0:
+            if e % 100 == 0:
                 # losses.append(loss)
                 print("Episod: ", e+1, " 1st action: ", [round(i, 4) for i in actions_grad[0]])
             q_grads = self.critic.gradients(states, actions_grad)
             self.actor.train_channel_selection(q_grads, states)
 
         # Transfer weights to target networks at rate Tau
-        self.actor.update_target()
+        states10, actions10, rewards10, new_states10 = self.last_10_buffer.sample_batch(10)
+        q_values_tc10 = self.critic.target_q(states10, self.actor.target_actions(states10))
+        q_values_c10 = self.critic.target_q(states10, self.actor.actions(states10))
+        print("Q-value of target critic and critic: ", sum(q_values_tc10), sum(q_values_c10))
+        if sum(q_values_tc10) < sum(q_values_c10):
+            self.actor.update_target()
+            print("\033[1;33m[Info] Actor target updated. \033[0m")
 
     def virtual_train(self, states, actions, rewards, new_states):
         q_values = self.critic.target_q(new_states, self.actor.target_actions(new_states))
@@ -171,7 +178,7 @@ class DDPG:
         for episode in range(5):
             self.critic.train(critic_target, states, actions)
         # Train actor
-        for e in range(5):
+        for e in range(50):
             actions_grad = self.actor.actions(states)
             q_grads = self.critic.gradients(states, actions_grad)
             self.actor.train_power_allocation(q_grads, states)
@@ -201,7 +208,7 @@ class DDPG:
         print("Pre-trained target Q -------------------------------")
         for i in range(len(actions)):
             delta = t_qs[i][0] - critic_target[i][0]
-            if delta >= 2.0:
+            if delta >= 1.0:
                 print([round(k, 2) for k in states[i]],
                       [round(k, 2) for k in actions[i]],
                       round(critic_target[i][0], 2),

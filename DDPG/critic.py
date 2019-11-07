@@ -12,7 +12,8 @@ class Critic:
         # self.env_dim = inp_dim
         # self.act_dim = out_dim
         self.time_step = 0
-        self.tau_in, self.lr = tau_in, lr
+        self.tau_in = tau_in
+        self.lr = lr
         self.sess = sess
         self.state_dim = state_dim
         self.action_dim = action_dim
@@ -20,9 +21,9 @@ class Critic:
         self.state_input, self.action_input, \
         self.q_value_output, self.net = self.create_q_network(state_dim, action_dim)
         self.action_net = [self.net[0], self.net[1], self.net[2], self.net[3]]
-        self.state_net = [self.net[4], self.net[5], self.net[6], self.net[7]]
-        self.combined_net = [self.net[8], self.net[9], self.net[10], self.net[11],
-                             self.net[12], self.net[13], self.net[14]]
+        self.state_net = [self.net[4], self.net[5]]
+        self.combined_net = [self.net[6], self.net[7], self.net[8], self.net[9],
+                             self.net[10], self.net[11], self.net[12]]
 
         self.target_state_input, self.target_action_input, \
         self.target_q_value_output, self.target_update, \
@@ -30,7 +31,9 @@ class Critic:
 
         self.create_training_method()
         self.sess.run(tf.initialize_all_variables())
+        self.first_target_update = 0
         self.update_target()
+        self.first_target_update = 1
 
     def create_training_method(self):
         # Define training optimizer
@@ -40,7 +43,7 @@ class Critic:
         self.loss = tf.reduce_mean(tf.square(self.v_input - self.q_value_output))
         self.cost = self.loss + weight_decay
         self.optimizer = tf.train.AdamOptimizer(self.lr).minimize(self.cost)
-        action_com_var_list = self.action_net + [self.net[13], self.net[14]]
+        action_com_var_list = self.action_net + [self.net[11], self.net[12]]
         self.optimizer_action_com = tf.train.AdamOptimizer(self.lr).minimize(self.cost, var_list=action_com_var_list)
         state_com_var_list = self.state_net + self.combined_net
         self.optimizer_state_com = tf.train.AdamOptimizer(self.lr).minimize(self.cost, var_list=state_com_var_list)
@@ -62,13 +65,14 @@ class Critic:
         a_b1 = self.variable([a_layer1_size], action_dim)
         a_W2 = self.variable([a_layer1_size, a_layer2_size], a_layer1_size)
         a_b2 = self.variable([a_layer2_size], a_layer1_size)
-        s_W1 = self.variable([state_dim, s_layer1_size], state_dim)
-        s_b1 = self.variable([s_layer1_size], state_dim)
-        s_W2 = tf.Variable(tf.random_uniform([s_layer1_size, s_layer2_size], -3e-5, 3e-5))
-        s_b2 = tf.Variable(tf.random_uniform([s_layer2_size], -3e-5))
+        s_W1 = self.variable([state_dim + action_dim, s_layer1_size], state_dim + action_dim)
+        s_b1 = self.variable([s_layer1_size], state_dim + action_dim)
+        # s_W2 = tf.Variable(tf.random_uniform([s_layer1_size, s_layer2_size], -3e-5, 3e-5))
+        # s_b2 = tf.Variable(tf.random_uniform([s_layer2_size], -3e-5))
 
         W1_action = tf.Variable(tf.eye(a_layer2_size, num_columns=combined_layer1_size))
-        W1_state = tf.Variable(tf.zeros([s_layer2_size, combined_layer1_size]))
+        W1_state = tf.Variable(tf.zeros([s_layer1_size, combined_layer1_size]))
+
         b1 = tf.Variable(tf.zeros([combined_layer1_size]))
         W2 = tf.Variable(tf.eye(combined_layer1_size, num_columns=combined_layer2_size))
         b2 = tf.Variable(tf.zeros([combined_layer2_size]))
@@ -77,13 +81,13 @@ class Critic:
 
         a_layer1 = tf.nn.relu(tf.matmul(action_input, a_W1) + a_b1)
         a_layer2 = tf.nn.relu(tf.matmul(a_layer1, a_W2) + a_b2)
-        s_layer1 = tf.nn.relu(tf.matmul(state_input, s_W1) + s_b1)
-        s_layer2 = tf.nn.relu(tf.matmul(s_layer1, s_W2) + s_b2)
-        combined_layer1 = tf.nn.relu(tf.matmul(a_layer2, W1_action) + tf.matmul(s_layer2, W1_state) + b1)
+        s_layer1 = tf.nn.relu(tf.matmul(tf.concat([action_input, state_input], axis=1), s_W1) + s_b1)
+        # s_layer2 = tf.nn.relu(tf.matmul(s_layer1, s_W2) + s_b2)
+        combined_layer1 = tf.nn.relu(tf.matmul(a_layer2, W1_action) + tf.matmul(s_layer1, W1_state) + b1)
         combined_layer2 = tf.nn.relu(tf.matmul(combined_layer1, W2) + b2)
         q_value_output = tf.identity(tf.matmul(combined_layer2, W3) + b3)
 
-        return state_input, action_input, q_value_output, [a_W1, a_b1, a_W2, a_b2, s_W1, s_b1, s_W2, s_b2,
+        return state_input, action_input, q_value_output, [a_W1, a_b1, a_W2, a_b2, s_W1, s_b1,
                                                            W1_action, W1_state, b1, W2, b2, W3, b3]
 
     def create_target_q_network(self, state_dim, action_dim, net):
@@ -97,24 +101,29 @@ class Critic:
 
         a_layer1 = tf.nn.relu(tf.matmul(action_input, target_net[0]) + target_net[1])
         a_layer2 = tf.nn.relu(tf.matmul(a_layer1, target_net[2]) + target_net[3])
-        s_layer1 = tf.nn.relu(tf.matmul(state_input, target_net[4]) + target_net[5])
-        s_layer2 = tf.nn.relu(tf.matmul(s_layer1, target_net[6]) + target_net[7])
-        combined_layer1 = tf.nn.relu(tf.matmul(a_layer2, target_net[8]) +
-                                     tf.matmul(s_layer2, target_net[9]) + target_net[10])
-        combined_layer2 = tf.nn.relu(tf.matmul(combined_layer1, target_net[11]) + target_net[12])
-        q_value_output = tf.identity(tf.matmul(combined_layer2, target_net[13]) + target_net[14])
+        s_layer1 = tf.nn.relu(tf.matmul(tf.concat([action_input, state_input], axis=1), target_net[4]) + target_net[5])
+        # s_layer2 = tf.nn.relu(tf.matmul(s_layer1, target_net[6]) + target_net[7])
+        combined_layer1 = tf.nn.relu(tf.matmul(a_layer2, target_net[6]) +
+                                     tf.matmul(s_layer1, target_net[7]) + target_net[8])
+        combined_layer2 = tf.nn.relu(tf.matmul(combined_layer1, target_net[9]) + target_net[10])
+        q_value_output = tf.identity(tf.matmul(combined_layer2, target_net[11]) + target_net[12])
 
         return state_input, action_input, q_value_output, target_update, target_net
 
-    def update_target(self):
+    def tau_update_target(self, tau):
         self.sess.run(self.target_update, feed_dict={
-            self.tau: self.tau_in
+            self.tau: tau
         })
 
+    def update_target(self):
+        if self.first_target_update == 1:
+            self.tau_update_target(1.0)
+            self.first_target_update = 0
+        else:
+            self.tau_update_target(self.tau_in)
+
     def pre_train_target(self):
-        self.sess.run(self.target_update, feed_dict={
-            self.tau: 1.0
-        })
+        self.tau_update_target(1.0)
 
     def train_action_com(self, v_batch, state_batch, action_batch):
         self.sess.run(self.optimizer_action_com, feed_dict={

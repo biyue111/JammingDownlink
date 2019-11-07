@@ -12,6 +12,7 @@ class DownlinkEnv:
         self.user_num = configs.USER_NUM
         self.bs_max_power = configs.BS_MAX_POWER
         self.max_user_datarate = self.get_max_datarate()
+        print("Max_user_datarate: ", self.max_user_datarate)
         self.sinr_threshold = configs.SINR_THRESHOLD  # if higher than that, this channel is occupied by jammer
 
     def get_init_state(self):
@@ -54,7 +55,8 @@ class DownlinkEnv:
         user_num_ls = np.zeros(self.channel_num)
         datarate_ls = np.zeros(self.user_num)
         sinr_ls = np.zeros(self.user_num)
-        jammed_reward_offset = -3
+        jammed_penalty = -5
+        min_reward = -2
         congested_user_reward_offset = 0
         # channel_availability[i][j] = 1: channel i is available for user j
         channel_availability = np.ones((self.channel_num, self.user_num))
@@ -87,10 +89,11 @@ class DownlinkEnv:
 
         reward = 0
         if jammed_flag > 0:
-            reward = jammed_reward_offset * jammed_flag
+            reward = jammed_penalty * jammed_flag
         # elif congested_user_num > 0:
         #     reward = congested_user_reward_offset - congested_user_num
         reward += sum(datarate_ls)  # TODO: fairness
+        reward = max(min_reward, reward)
         # print("data rate list:" + str(datarate_ls))
 
         return jammed_flag, reward, datarate_ls

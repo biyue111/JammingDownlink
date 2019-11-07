@@ -23,7 +23,7 @@ class BSAgent:
         self.virtual_action_step = configs.VIRTUAL_ACTION_STEP
 
     def act(self, s, t):
-        fix_power_flag = 1
+        fix_power_flag = 0
         fix_channel_flag = 0
         # print("The state:" + str(s))
         print("## BS station action ##")
@@ -168,5 +168,5 @@ class JMRAgent:
         # jammed_channel = 0  # fixed jammer
         a[jammed_channel] = 1.0
         a = a * self.power
-        print("Jammer's action: ", a)
+        # print("Jammer's action: ", a)
         return a

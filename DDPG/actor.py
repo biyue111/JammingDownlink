@@ -24,7 +24,7 @@ class Actor:
 
         self.target_state_input, self.target_action_output, \
         self.target_update, self.target_net = self.create_target_network(state_dim, action_dim, self.net)
-        self.init_actor = tf.initialize_variables(self.net)
+        self.init_channel_selection = tf.initialize_variables(self.channel_selection_net)
 
         self.create_training_method()
 
@@ -67,8 +67,8 @@ class Actor:
         b1 = self.variable([layer1_size], state_dim)
         W2 = self.variable([layer1_size, layer2_size], layer1_size)
         b2 = self.variable([layer2_size], layer1_size)
-        W3 = tf.Variable(tf.random_uniform([layer2_size, channel_num], -3e-3, 3e-3))
-        b3 = tf.Variable(tf.random_uniform([channel_num], -3e-3, 3e-3))
+        W3 = tf.Variable(tf.random_uniform([layer2_size, channel_num], -1.0, 1.0))
+        b3 = tf.Variable(tf.random_uniform([channel_num], -1.0, 1.0))
 
         layer1 = tf.nn.relu(tf.matmul(state_input, W1) + b1)
         layer2 = tf.nn.relu(tf.matmul(layer1, W2) + b2)
@@ -103,8 +103,8 @@ class Actor:
 
         return state_input, action_output, target_update, target_net
 
-    def initial_net(self):
-        self.sess.run(self.init_actor)
+    def initial_channel_selection_net(self):
+        self.sess.run(self.init_channel_selection)
 
     def update_target(self):
         self.sess.run(self.target_update, feed_dict={
