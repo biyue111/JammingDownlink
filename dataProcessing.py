@@ -15,7 +15,7 @@ for i in range(len(jammed_flags)):
     times += 1.0
     if jammed_flags[i] == 0:
         jamming_free_times += 1.0
-    if times >= 100:
+    if times >= 20:
         success_rate.append(1.0 * jamming_free_times/(times * 1.0))
         times = 0.0
         jamming_free_times = 0.0

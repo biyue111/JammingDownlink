@@ -7,41 +7,44 @@ import csv
 
 # -------------------- BS agent ------------------------
 class BSAgent:
-    def __init__(self, act_range):
+    def __init__(self, act_range, act_dim, state_dim):
         # Create a ddpg network with
         # actions: [power allocation in each channel, channel chosen for each user]
         # states: [user position (x, y), channel chosen, data_rate] * number of user
         # action range: [0, 1]
         self.max_power = configs.BS_MAX_POWER
         self.act_range = act_range
-        self.act_dim = configs.CHANNEL_NUM + configs.USER_NUM
-        channel_step = 2.0 / (configs.CHANNEL_NUM * 1.0)
-        self.channel_raw_action_ls = np.arange(-1.0 + 0.1 * channel_step, 1.0, channel_step)
-        self.state_dim = 4 * configs.USER_NUM
+        self.act_dim = act_dim
+        self.channel_raw_action_ls = configs.RAW_CHANNEL_LIST
+        self.state_dim = state_dim
         # print(self.act_dim, self.state_dim)
         self.brain = DDPG(self.act_dim, self.state_dim, act_range)
-        self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim, n_steps_annealing=1000)
+        self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim, n_steps_annealing=400)
         self.virtual_action_step = configs.VIRTUAL_ACTION_STEP
 
     def act(self, s, t):
-        fix_power_flag = 1
+        fix_power_flag = 0
         fix_channel_flag = 0
         # print("The state:" + str(s))
-        a = self.brain.policy_action(s)
-        # Clip continuous values to be valid w.r.t. environment
-        print("a directly from brain:" + str(a))
+        print("## BS station action ##")
+        a_no_noise_raw = self.brain.policy_action(s)
+        a_no_noise = self.get_real_action(a_no_noise_raw)
+        print("Action directly from brain:" + str(a_no_noise_raw))
+        print("Real action directly from brain:" + str(a_no_noise))
         a_es_raw = self.brain.actor.action(s)
-        print("a estimation directly from brain:" + str(a_es_raw))
+        print("action estimated directly from brain:" + str(a_es_raw))
         a_es = self.get_real_action(a_es_raw)
         print("Real a estimation directly from brain:" + str(a_es))
-        v = self.brain.critic.target_q(np.expand_dims(s, axis=0), np.expand_dims(a, axis=0))
+        v = self.brain.critic.target_q(np.expand_dims(s, axis=0), np.expand_dims(a_no_noise_raw, axis=0))
         print("Value of the chosen action:", v)
+        # ------- Add Noise -------
         noise = self.noise.generate(t)
         print("Noise: ", noise)
-        a = np.clip(a + noise, -self.act_range, self.act_range)
+        a = np.clip(a_no_noise_raw + noise, -self.act_range, self.act_range)
+        # ------- Fix action -------
         if fix_power_flag == 1:
             for i in range(configs.CHANNEL_NUM):
-                a[i] = 0.5
+                a[i] = 1.0
         if fix_channel_flag == 1:
             step = 2.0 / (configs.CHANNEL_NUM * 1.0 - 1.0)
             action_value = -1.0
@@ -52,7 +55,8 @@ class BSAgent:
             #         action_value = -1.0
             for i in range(configs.USER_NUM):
                 a[i + configs.CHANNEL_NUM] = 0
-        return a
+        print("####")
+        return a, a_no_noise_raw
 
     def get_real_action(self, raw_a):
         #  return "real" action: [power_allocation_ls, user_channel_ls]
@@ -61,15 +65,16 @@ class BSAgent:
         # Normalization
         raw_power_allocation = [(raw_power_allocation[i] + self.act_range) / (2 * self.act_range)
                                 for i in range(configs.CHANNEL_NUM)]
-        raw_user_channel_ls = [(raw_user_channel_ls[i] + self.act_range) / (2 * self.act_range)
-                               for i in range(configs.USER_NUM)]
+        # raw_user_channel_ls = [(raw_user_channel_ls[i] + self.act_range) / (2 * self.act_range)
+        #                        for i in range(configs.USER_NUM)]
         # Calculate the meaningful action (power and channel chosen)
         if sum(raw_power_allocation) == 0:
             power_allocation_ls = [self.max_power / configs.CHANNEL_NUM for _ in range(configs.CHANNEL_NUM)]
         else:
             power_allocation_ls = [raw_power_allocation[i] * self.max_power / sum(raw_power_allocation)
                                    for i in range(configs.CHANNEL_NUM)]
-        user_channel_ls = [math.floor(raw_user_channel_ls[i] * configs.CHANNEL_NUM) for i in range(configs.USER_NUM)]
+        user_channel_ls = [raw_channel_to_channel(raw_user_channel_ls[i]) for i in range(configs.USER_NUM)]
+        # print("[Test] raw_user_channel_ls, user_channel_ls", raw_user_channel_ls, user_channel_ls)
         for i in range(configs.USER_NUM):
             if user_channel_ls[i] >= configs.CHANNEL_NUM:
                 user_channel_ls[i] = configs.CHANNEL_NUM - 1
@@ -85,9 +90,9 @@ class BSAgent:
     def memorize(self, old_state, a, r, new_state):
         self.brain.memorize(old_state, a, r, new_state)
 
-    def pre_train(self, states, bs_actions, rewards):
-        # Generate pre-train data
-        self.brain.pre_train(states, bs_actions, rewards, states)
+    # def pre_train(self, states, bs_actions, rewards):
+    #     Generate pre-train data
+        # self.brain.pre_train(states, bs_actions, rewards, states)
 
     def get_virtual_actions(self, real_raw_action):
         # Generate virtual actions
@@ -99,8 +104,8 @@ class BSAgent:
         virtual_actions = np.zeros((len(a_pa_ls), configs.USER_NUM + configs.CHANNEL_NUM))
         for i in range(len(a_pa_ls)):
             virtual_actions[i] = np.hstack((a_pa_ls[i], channel_chosen))
-        print("Number of Virtual actions: ", len(virtual_actions))
-        print("Virtual actions: ", virtual_actions)
+        # print("Number of Virtual actions: ", len(virtual_actions))
+        # print("Virtual actions: ", virtual_actions)
         return virtual_actions
 
     def critic_test(self, s, file_name):
@@ -113,29 +118,20 @@ class BSAgent:
         writer.writerow(a3)
         writer.writerow(real_a3)
 
-        a1 = -1
-        a2 = -1
-        v = np.zeros(len(a3))
-        t_v = np.zeros(len(a3))
-        for i in range(len(a3)):
-            a = [1, 1, 1, a1, a2, a3[i]]
-            t_v[i] = self.brain.critic.target_q(np.expand_dims(s, axis=0), np.expand_dims(a, axis=0))
-            v[i] = self.brain.critic.q_value(np.expand_dims(s, axis=0), np.expand_dims(a, axis=0))
-        writer.writerow(t_v)
-        writer.writerow(v)
-        # print("The value of pairs: ", v)
-
-        a1 = -1
-        a2 = 0
-        v = np.zeros(len(a3))
-        for i in range(len(a3)):
-            a = [1, 1, 1, a1, a2, a3[i]]
-            t_v[i] = self.brain.critic.target_q(np.expand_dims(s, axis=0), np.expand_dims(a, axis=0))
-            v[i] = self.brain.critic.q_value(np.expand_dims(s, axis=0), np.expand_dims(a, axis=0))
-        writer.writerow(t_v)
-        writer.writerow(v)
-        # print("The value of pairs: ", v)
-        # csv_file.close()
+        a1_idx = [0, 0, 1, 2]
+        a2_idx = [0, 1, 1, 2]
+        for k in range(len(a1_idx)):
+            a1 = self.brain.discrete_action_ls[a1_idx[k]]
+            a2 = self.brain.discrete_action_ls[a2_idx[k]]
+            v = np.zeros(len(a3))
+            t_v = np.zeros(len(a3))
+            for i in range(len(a3)):
+                a = [1, 1, 1, a1, a2, a3[i]]
+                t_v[i] = self.brain.critic.target_q(np.expand_dims(s, axis=0), np.expand_dims(a, axis=0))
+                v[i] = self.brain.critic.q_value(np.expand_dims(s, axis=0), np.expand_dims(a, axis=0))
+            writer.writerow(t_v)
+            writer.writerow(v)
+            # print("The value of pairs: ", v)
 
     def actor_test(self, s):
         # s = [1.0, 1.0, 1.0, 3.65596417, -1.0, 1.0, 1.0, 3.65596417]
@@ -147,6 +143,12 @@ class BSAgent:
         print("Pre-train actor test: ", raw_a_t, a_t)
         v = self.brain.critic.target_q(np.expand_dims(s, axis=0), np.expand_dims(raw_a, axis=0))
         print("Pre-train actor test q-value: ", v)
+
+    def save_brain(self, path):
+        self.brain.save_session(path)
+
+    def load_brain(self, path):
+        self.brain.load_session(path)
 
 
 # -------------------- JAMMER AGENT --------------------
