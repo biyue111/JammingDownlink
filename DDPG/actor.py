@@ -84,6 +84,24 @@ class Actor:
 
         return state_input, action_output, [W1, b1, W2, b2, W3, b3, W4, b4, W5, b5]
 
+    def create_pre_train_network(self, state_dim, action_dim):
+        layer1_size = 100
+        layer2_size = 50
+        channel_num = configs.CHANNEL_NUM
+        user_num = configs.USER_NUM
+
+        action_channel_input = tf.placeholder("float", [None, user_num])
+
+        W4 = self.variable([channel_num, layer1_size], channel_num)
+        b4 = self.variable([layer1_size], channel_num)
+        W5 = tf.Variable(tf.random_uniform([layer1_size, user_num], -3e-3, 3e-3))
+        b5 = tf.Variable(tf.random_uniform([user_num], -3e-3, 3e-3))
+        layer4 = tf.nn.relu(tf.matmul(action_channel, W4) + b4)
+        action_energy = tf.tanh(tf.matmul(layer4, W5) + b5)
+        action_output = tf.concat([action_energy, action_channel], axis=1)
+
+        return state_input, action_output, [W1, b1, W2, b2, W3, b3, W4, b4, W5, b5]
+
     def create_target_network(self, state_dim, action_dim, net):
         state_input = tf.placeholder("float", [None, state_dim])
         self.tau = tf.placeholder("float")
