@@ -26,7 +26,7 @@ class Environment:
         a_channels = configs.RAW_CHANNEL_LIST
         a_channel_list = np.array(np.meshgrid(a_channels, a_channels, a_channels)).T.reshape(-1, 3)
         power_step = 0.2
-        a_powers = np.arange(0, 1 + power_step, power_step)
+        a_powers = np.arange(-1.0, 1 + power_step, power_step)
         a_power_list = np.array(np.meshgrid(a_powers, a_powers, a_powers)).T.reshape(-1, 3)
         jmr_a = np.zeros(configs.CHANNEL_NUM)
         bs_raw_actions = []
@@ -40,7 +40,11 @@ class Environment:
                 bs_raw_actions.append(bs_raw_a)
                 rewards.append(r)
                 states.append(s)
-        bs_agent.pre_train(np.array(states), np.array(bs_raw_actions), np.array(rewards))
+        a_channel_test_list = [[a_channels[0], a_channels[0], a_channels[0]],
+                               [a_channels[0], a_channels[0], a_channels[1]],
+                               [a_channels[0], a_channels[1], a_channels[2]]]
+        bs_agent.pre_train(np.array(states), np.array(bs_raw_actions), np.array(rewards), np.array(a_channel_list))
+        # bs_agent.pre_train(np.array(states), np.array(bs_raw_actions), np.array(rewards), np.array(a_channel_test_list))
 
     def run(self, bs_agent, jmr_agent):
         # tqdm_e = tqdm(range(configs.UPDATE_NUM), desc='Score', leave=True, unit=" episodes")
@@ -84,19 +88,21 @@ class Environment:
                     bs_agent.memorize(old_state, bs_raw_a_ls, r, new_state)
                 bs_agent.brain.last_10_buffer.memorize(old_state, bs_raw_a_ls, r, new_state)
 
-            """ Update using virtual data """
-            if e > 701:
-                bs_virtual_raw_actions = bs_agent.get_virtual_actions(bs_raw_a_ls)
-                v_rewards = np.zeros(len(bs_virtual_raw_actions))
-                v_old_states = np.zeros((len(bs_virtual_raw_actions), bs_agent.state_dim))
-                v_next_states = np.zeros((len(bs_virtual_raw_actions), bs_agent.state_dim))
-                for k in range(len(bs_virtual_raw_actions)):
-                    v_old_states[k] = old_state
-                    v_bs_action = bs_agent.get_real_action(bs_virtual_raw_actions[k])
-                    v_jammed_flag, v_rewards[k], v_next_states[k] = self.env.bs_virtual_step([v_bs_action, jmr_a_ls])
-                bs_agent.virtual_update_brain(v_old_states, bs_virtual_raw_actions, v_rewards, v_next_states)
             if e % 5 == 0:
-                bs_agent.update_brain_channel_selection()
+                bs_agent.update_brain_channel_selection(e, jammed_flag_list)
+            """ Update using virtual data """
+            if e > 300 and e % 5 == 0:
+                # bs_virtual_raw_actions = bs_agent.get_virtual_actions(bs_raw_a_ls)
+                # v_rewards = np.zeros(len(bs_virtual_raw_actions))
+                # v_old_states = np.zeros((len(bs_virtual_raw_actions), bs_agent.state_dim))
+                # v_next_states = np.zeros((len(bs_virtual_raw_actions), bs_agent.state_dim))
+
+                # for k in range(len(bs_virtual_raw_actions)):
+                #     v_old_states[k] = old_state
+                #     v_bs_action = bs_agent.get_real_action(bs_virtual_raw_actions[k])
+                #     v_jammed_flag, v_rewards[k], v_next_states[k] = self.env.bs_virtual_step([v_bs_action, jmr_a_ls])
+                bs_agent.virtual_update_brain(e, power_allocation_records, user_channel_choosing_records)
+
 
             # Update current state
             old_state = new_state
