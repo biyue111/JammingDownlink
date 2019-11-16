@@ -32,10 +32,12 @@ class Actor:
 
         self.target_state_input, self.target_action_output, \
         self.target_update, self.target_net = self.create_target_network(state_dim, action_dim, self.net)
-        self.network_transfer = [tf.assign(e, t) for e, t in zip(self.net[6:12], self.pre_target_power_net)]
+        self.network_transfer = [tf.assign(e, t) for e, t in zip(self.power_allocation_net, self.pre_target_power_net)]
         print("self.net: ", self.net)
         self.init_channel_selection = tf.initialize_variables(self.channel_selection_net)
         self.init_power_allocation = tf.initialize_variables(self.power_allocation_net)
+
+        self.target_to_estimation = [tf.assign(e, t) for e, t in zip(self.net, self.target_net)]
 
         self.create_training_method()
 
@@ -96,8 +98,8 @@ class Actor:
         b4 = self.variable([layer1_size], user_num)
         W5 = tf.Variable(tf.random_uniform([layer1_size, layer2_size], -1.0, 1.0))
         b5 = tf.Variable(tf.random_uniform([layer2_size], -1.0, 1.0))
-        W6 = tf.Variable(tf.random_uniform([layer2_size, channel_num], -1.0, 1.0))
-        b6 = tf.Variable(tf.random_uniform([channel_num], -1.0, 1.0))
+        W6 = tf.Variable(tf.random_uniform([layer2_size, channel_num], -3e-4, 3e-4))
+        b6 = tf.Variable(tf.random_uniform([channel_num], -3e-4, 3e-4))
 
         layer4 = tf.nn.relu(tf.matmul(action_channel, W4) + b4)
         layer5 = tf.nn.relu(tf.matmul(layer4, W5) + b5)
@@ -205,6 +207,9 @@ class Actor:
         self.sess.run(self.pre_target_power_update, feed_dict={
             self.pre_tau: 1.0
         })
+
+    def transfer_target_to_estimation(self):
+        self.sess.run(self.target_to_estimation)
 
     def transfer_power_network(self):
         self.sess.run(self.network_transfer)

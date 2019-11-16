@@ -136,7 +136,7 @@ class DDPG:
         losses = []
         for e in range(1000):
             loss = self.critic.train_state_com(critic_target, states, actions)
-            if loss < 0.1:
+            if loss < 0.02:
                 break
             if e % 200 == 0:
                 # losses.append(loss)
@@ -155,6 +155,7 @@ class DDPG:
 
         # Train actor
         if actor_needed_update_flag == 1:
+            self.actor.transfer_target_to_estimation()
             for i in range(5):
                 self.actor.initial_channel_selection_net()
                 for e in range(500):
@@ -171,7 +172,54 @@ class DDPG:
                 print("Episode:", i, "Q-value of target critic and critic: ", sum(q_values_tc10), sum(q_values_c10))
                 if sum(q_values_tc10) < sum(q_values_c10):
                     self.actor.update_target()
-                    print("\033[1;33m[Info] Actor target updated. \033[0m")
+                    print("\033[1;33m[Info] Actor channel selection target updated. \033[0m")
+
+    def train_power_allocation_with_smallnet(self, s):
+        states10, actions10, rewards10, new_states10 = self.last_10_buffer.sample_batch(10)
+        # print(actions10)
+        # for i in range(len(states10)):
+        #     for j in range(configs.CHANNEL_NUM):
+        #         states10[i][j] = 0.0
+        # states10 = [s[i] for i in range(len(actions10))]
+        a_channels = actions10[:, configs.CHANNEL_NUM:self.act_dim]
+        # print(a_channels)
+        self.actor.transfer_target_to_estimation()
+        for i in range(40):
+            self.actor.initial_pre_power_allocation_net()
+            for e in range(500):
+                pre_power_actions_grad = self.actor.pre_power_actions(a_channels)
+                pre_actions_grad = np.hstack((pre_power_actions_grad, a_channels))
+                q_grads = self.critic.gradients(states10, pre_actions_grad)
+                self.actor.pre_train_power_allocation(q_grads, a_channels)
+
+            pre_target_power_actions_grad = self.actor.pre_target_power_actions(a_channels)
+            tq_values = self.critic.target_q(states10, np.hstack((pre_target_power_actions_grad, a_channels)))
+            pre_power_actions_grad = self.actor.pre_power_actions(a_channels)
+            q_values = self.critic.target_q(states10, np.hstack((pre_power_actions_grad, a_channels)))
+            print("Small Actor.power_allocation Episode:", i)
+            print("Sum Q-values:", sum(q_values), "Sum Target Q-values:", sum(tq_values))
+            if sum(q_values) >= (sum(tq_values)) or i :
+                self.actor.update_target_pre_power_allocation()
+
+        pre_power_actions_grad = self.actor.pre_target_power_actions(a_channels)
+        pre_actions_grad = np.hstack((pre_power_actions_grad, a_channels))
+        tq_values = self.critic.target_q(states10, pre_actions_grad)
+        for i in range(len(a_channels)):
+            print([round(k, 2) for k in a_channels[i]],
+                  [round(k, 2) for k in pre_power_actions_grad[i]],
+                  round(tq_values[i][0], 2))
+
+        # Update small power allocation net to the actor (estimation) network
+        self.actor.transfer_power_network()
+        target_actions_test = self.actor.target_actions(states10)
+        tq_values = self.critic.target_q(states10, target_actions_test)
+        actions_test = self.actor.actions(states10)
+        q_values = self.critic.target_q(states10, actions_test)
+        print("Actor.power_allocation :")
+        print("Sum Q-values:", sum(q_values), "Sum Target Q-values:", sum(tq_values))
+        # if sum(q_values) >= (sum(tq_values)):
+        self.actor.update_target()
+        print("\033[1;33m[Info] Actor power allocation target updated. \033[0m")
 
     def virtual_train(self):
         print("Begin virtual train")
@@ -183,9 +231,10 @@ class DDPG:
         #     self.critic.train(critic_target, states, actions)
         # Train actor
         states10, actions10, rewards10, new_states10 = self.last_10_buffer.sample_batch(10)
-        for i in range(10):
+        self.actor.transfer_target_to_estimation()
+        for i in range(40):
             self.actor.initial_power_allocation_net()
-            for e in range(1000):
+            for e in range(200):
                 actions_grad = self.actor.actions(states10)
                 q_grads = self.critic.gradients(states10, actions_grad)
                 self.actor.train_power_allocation(q_grads, states10)
@@ -252,9 +301,9 @@ class DDPG:
         print("Pre-train Actor.power_allocation-------------------")
 
         pre_states = np.array(states[0:len(a_channels)])
-        # for i in range(1):
+        # for i in range(100):
         #     self.actor.initial_pre_power_allocation_net()
-        #     for e in range(2000):
+        #     for e in range(200):
         #         pre_power_actions_grad = self.actor.pre_power_actions(a_channels)
         #         pre_actions_grad = np.hstack((pre_power_actions_grad, a_channels))
         #         q_grads = self.critic.gradients(pre_states, pre_actions_grad)
@@ -268,8 +317,8 @@ class DDPG:
         #     print("Sum Q-values:", sum(q_values), "Sum Target Q-values:", sum(tq_values))
         #     if sum(q_values) >= (sum(tq_values)):
         #         self.actor.update_target_pre_power_allocation()
-
-        # Actor.power_allocation Test
+        #
+        ## Actor.power_allocation Test
         # pre_power_actions_grad = self.actor.pre_target_power_actions(a_channels)
         # pre_actions_grad = np.hstack((pre_power_actions_grad, a_channels))
         # tq_values = self.critic.target_q(pre_states, pre_actions_grad)

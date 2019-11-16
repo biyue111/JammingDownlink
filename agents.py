@@ -41,6 +41,7 @@ class BSAgent:
         noise = self.noise.generate(t)
         print("Noise: ", noise)
         a = np.clip(a_no_noise_raw + noise, -self.act_range, self.act_range)
+        a = self.brain.get_discrete_action(s, a)
         # ------- Fix action -------
         if fix_power_flag == 1:
             for i in range(configs.CHANNEL_NUM):
@@ -119,6 +120,12 @@ class BSAgent:
         if actor_needed_update_flag == 1:
             print("\033[0;33m[Info] Need power allocation update. \033[0m")
             self.brain.virtual_train()
+
+    def update_brain_power_allocation_with_smallnet(self, episode, power_list, channel_list, s):
+        actor_needed_update_flag = self.is_needed_update_power_allocation_actor(episode, power_list, channel_list)
+        if actor_needed_update_flag == 1:
+            print("\033[0;33m[Info] Need power allocation update. \033[0m")
+            self.brain.train_power_allocation_with_smallnet(s)
 
     def memorize(self, old_state, a, r, new_state):
         self.brain.memorize(old_state, a, r, new_state)

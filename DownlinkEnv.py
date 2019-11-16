@@ -55,9 +55,10 @@ class DownlinkEnv:
         user_num_ls = np.zeros(self.channel_num)
         datarate_ls = np.zeros(self.user_num)
         sinr_ls = np.zeros(self.user_num)
-        jammed_penalty = -5
-        min_reward = -2
-        congested_user_reward_offset = 0
+        jammed_penalty = -5.0
+        useless_power_penalty = -1.0
+        min_reward = -2.0
+        congested_user_reward_offset = 0.0
         # channel_availability[i][j] = 1: channel i is available for user j
         channel_availability = np.ones((self.channel_num, self.user_num))
         # calculate number of user in one channel
@@ -92,6 +93,16 @@ class DownlinkEnv:
             reward = jammed_penalty * jammed_flag
         # elif congested_user_num > 0:
         #     reward = congested_user_reward_offset - congested_user_num
+        # useless_power = 0.0
+        # for i in range(self.channel_num):
+        #     channel_no_user_flag = 1
+        #     for j in range(self.user_num):
+        #         if user_channel_ls[j] == i:
+        #             channel_no_user_flag = 0
+        #     if channel_no_user_flag == 1:
+        #         useless_power += bs_power_allocation[i]
+        # reward += useless_power * useless_power_penalty
+
         reward += sum(datarate_ls)  # TODO: fairness
         reward = max(min_reward, reward)
         # print("data rate list:" + str(datarate_ls))

@@ -1,0 +1,2 @@
+model_checkpoint_path: "pre-train_phase1.ckpt"
+all_model_checkpoint_paths: "pre-train_phase1.ckpt"
