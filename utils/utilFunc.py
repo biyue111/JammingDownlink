@@ -84,3 +84,4 @@ class OrnsteinUhlenbeckProcess(object):
         # x = sigma * np.random.normal(size=self.size)
         self.x0 = x
         return x
+

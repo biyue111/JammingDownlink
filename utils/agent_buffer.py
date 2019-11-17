@@ -72,3 +72,7 @@ class AgentBuffer(object):
         """
         self.buffer = deque()
         self.count = 0
+
+    def print_buffer(self):
+        for i in range(self.count):
+            print(self.buffer[i][1], self.buffer[i][2])
