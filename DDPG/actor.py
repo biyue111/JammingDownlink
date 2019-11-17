@@ -21,10 +21,16 @@ class Actor:
         self.state_input, self.action_output, \
         self.net = self.create_network(state_dim, action_dim)
         self.channel_selection_net = self.net[0:6]
+        self.power_allocation_net = self.net[6:12]
 
         self.target_state_input, self.target_action_output, \
         self.target_update, self.target_net = self.create_target_network(state_dim, action_dim, self.net)
+
+        print("self.net: ", self.net)
         self.init_channel_selection = tf.initialize_variables(self.channel_selection_net)
+        self.init_power_allocation = tf.initialize_variables(self.power_allocation_net)
+
+        self.target_to_estimation = [tf.assign(e, t) for e, t in zip(self.net, self.target_net)]
 
         self.create_training_method()
 
@@ -36,6 +42,7 @@ class Actor:
         self.q_gradient_input = tf.placeholder("float", [None, self.action_dim])
         self.parameters_gradients = tf.gradients(self.action_output, self.net, -self.q_gradient_input)
         self.optimizer = tf.train.AdamOptimizer(self.lr).apply_gradients(zip(self.parameters_gradients, self.net))
+
         # upper network (channel selection) optimizer
         self.channel_selection_parameters_gradients = tf.gradients(self.action_output,
                                                                    self.net[0:6], -self.q_gradient_input)
@@ -43,9 +50,10 @@ class Actor:
             tf.train.AdamOptimizer(self.lr).apply_gradients(zip(self.channel_selection_parameters_gradients, self.net[0:6]))
 
         self.power_allocation_parameters_gradients = tf.gradients(self.action_output,
-                                                                  self.net[6:10], -self.q_gradient_input)
+                                                                  self.power_allocation_net, -self.q_gradient_input)
         self.power_allocation_optimizer = \
-            tf.train.AdamOptimizer(self.lr).apply_gradients(zip(self.power_allocation_parameters_gradients, self.net[6:10]))
+            tf.train.AdamOptimizer(self.lr).apply_gradients(zip(self.power_allocation_parameters_gradients,
+                                                                self.power_allocation_net))
         # lower network (power allocation) optimizer
         ## regularization l2norm
         # weight_decay = tf.add_n([1e-3 * tf.nn.l2_loss(var) for var in self.net])
@@ -74,15 +82,19 @@ class Actor:
         layer2 = tf.nn.relu(tf.matmul(layer1, W2) + b2)
         action_channel = tf.tanh(tf.matmul(layer2, W3) + b3)
 
-        W4 = self.variable([channel_num, layer1_size], channel_num)
-        b4 = self.variable([layer1_size], channel_num)
-        W5 = tf.Variable(tf.random_uniform([layer1_size, user_num], -3e-3, 3e-3))
-        b5 = tf.Variable(tf.random_uniform([user_num], -3e-3, 3e-3))
+        W4 = self.variable([user_num, layer1_size], user_num)
+        b4 = self.variable([layer1_size], user_num)
+        W5 = tf.Variable(tf.random_uniform([layer1_size, layer2_size], -1.0, 1.0))
+        b5 = tf.Variable(tf.random_uniform([layer2_size], -1.0, 1.0))
+        W6 = tf.Variable(tf.random_uniform([layer2_size, channel_num], -3e-4, 3e-4))
+        b6 = tf.Variable(tf.random_uniform([channel_num], -3e-4, 3e-4))
+
         layer4 = tf.nn.relu(tf.matmul(action_channel, W4) + b4)
-        action_energy = tf.tanh(tf.matmul(layer4, W5) + b5)
+        layer5 = tf.nn.relu(tf.matmul(layer4, W5) + b5)
+        action_energy = tf.tanh(tf.matmul(layer5, W6) + b6)
         action_output = tf.concat([action_energy, action_channel], axis=1)
 
-        return state_input, action_output, [W1, b1, W2, b2, W3, b3, W4, b4, W5, b5]
+        return state_input, action_output, [W1, b1, W2, b2, W3, b3, W4, b4, W5, b5, W6, b6]
 
     def create_target_network(self, state_dim, action_dim, net):
         state_input = tf.placeholder("float", [None, state_dim])
@@ -96,8 +108,8 @@ class Actor:
         action_channel = tf.tanh(tf.matmul(layer2, target_net[4]) + target_net[5])
 
         layer4 = tf.nn.relu(tf.matmul(action_channel, target_net[6]) + target_net[7])
-        # layer5 = tf.nn.relu(tf.matmul(layer4, target_net[8]) + target_net[9])
-        action_energy = tf.tanh(tf.matmul(layer4, target_net[8]) + target_net[9])
+        layer5 = tf.nn.relu(tf.matmul(layer4, target_net[8]) + target_net[9])
+        action_energy = tf.tanh(tf.matmul(layer5, target_net[10]) + target_net[11])
 
         action_output = tf.concat([action_energy, action_channel], axis=1)
 
@@ -105,6 +117,9 @@ class Actor:
 
     def initial_channel_selection_net(self):
         self.sess.run(self.init_channel_selection)
+
+    def initial_power_allocation_net(self):
+        self.sess.run(self.init_power_allocation)
 
     def update_target(self):
         self.sess.run(self.target_update, feed_dict={
@@ -130,6 +145,9 @@ class Actor:
         self.sess.run(self.power_allocation_optimizer, feed_dict={
             self.q_gradient_input: q_gradient_batch,
             self.state_input: state_batch})
+
+    def transfer_target_to_estimation(self):
+        self.sess.run(self.target_to_estimation)
 
     def actions(self, state_batch):
         return self.sess.run(self.action_output, feed_dict={

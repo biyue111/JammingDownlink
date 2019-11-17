@@ -19,7 +19,7 @@ class BSAgent:
         self.state_dim = state_dim
         # print(self.act_dim, self.state_dim)
         self.brain = DDPG(self.act_dim, self.state_dim, act_range)
-        self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim, n_steps_annealing=400)
+        self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim, n_steps_annealing=310)
         self.virtual_action_step = configs.VIRTUAL_ACTION_STEP
 
     def act(self, s, t):
@@ -41,6 +41,7 @@ class BSAgent:
         noise = self.noise.generate(t)
         print("Noise: ", noise)
         a = np.clip(a_no_noise_raw + noise, -self.act_range, self.act_range)
+        a = self.brain.get_discrete_action(s, a)
         # ------- Fix action -------
         if fix_power_flag == 1:
             for i in range(configs.CHANNEL_NUM):
@@ -80,23 +81,52 @@ class BSAgent:
                 user_channel_ls[i] = configs.CHANNEL_NUM - 1
         return [power_allocation_ls, user_channel_ls]
 
-    def update_brain(self):
+    def update_brain(self, episode, jammed_flag_list, power_list, channel_list):
+        needed_channel_selection = self.is_needed_update_channel_selection_actor(episode, jammed_flag_list)
+        needed_power_allocation = self.is_needed_update_power_allocation_actor(episode, power_list, channel_list)
         if self.brain.buffer.count > configs.BATCH_SIZE:
-            self.brain.train()
+            if needed_channel_selection or needed_power_allocation:
+                self.brain.train()
 
-    def update_brain_channel_selection(self):
-        if self.brain.buffer.count > configs.BATCH_SIZE:
-            self.brain.train_channel_selection_transfer()
+    def is_needed_update_channel_selection_actor(self, episode, jammed_flag_list):
+        needed_flag = 0
+        for i in range(10):
+            if jammed_flag_list[episode - i] > 0:
+                needed_flag = 1
+        return needed_flag
 
-    def virtual_update_brain(self, states, bs_actions, rewards, next_states):
-        self.brain.virtual_train(states, bs_actions, rewards, next_states)
+    # def update_brain_channel_selection(self, episode, jammed_flag_list):
+    #     actor_needed_update_flag = self.is_needed_update_channel_selection_actor(episode, jammed_flag_list)
+    #     if self.brain.buffer.count > configs.BATCH_SIZE:
+    #         if actor_needed_update_flag == 1:
+    #             print("\033[0;33m[Info] Need channel selection actor update. \033[0m")
+    #         self.brain.train_channel_selection_transfer(actor_needed_update_flag)
+
+    def is_needed_update_power_allocation_actor(self, episode, power_list, channel_list):
+        needed_flag = 0
+        for i in range(10):
+            p = episode - i
+            useless_power = 0.0
+            for c in range(configs.CHANNEL_NUM):
+                channel_used = 0
+                for u in range(configs.USER_NUM):
+                    if channel_list[p][u] == c:
+                        channel_used = 1
+                if channel_used == 0:
+                    useless_power += power_list[p][c]
+            if useless_power * 100.0 >= configs.BS_MAX_POWER:
+                needed_flag = 1
+        return needed_flag
+
+    # def virtual_update_brain(self, states, bs_actions, rewards, next_states):
+    #     self.brain.virtual_train(states, bs_actions, rewards, next_states)
 
     def memorize(self, old_state, a, r, new_state):
         self.brain.memorize(old_state, a, r, new_state)
 
-    def pre_train(self, states, bs_actions, rewards):
+    def pre_train(self, states, bs_actions, rewards, a_channels):
         # Generate pre-train data
-        self.brain.pre_train(states, bs_actions, rewards, states)
+        self.brain.pre_train(states, bs_actions, rewards, states, a_channels)
         self.actor_test(states[0])
 
     def get_virtual_actions(self, real_raw_action):
@@ -163,8 +193,8 @@ class JMRAgent:
 
     def act(self, s, t):
         a = np.zeros(configs.CHANNEL_NUM)
-        # jammed_channel = t % configs.CHANNEL_NUM  # 3-phase jammer
-        jammed_channel = t % (configs.CHANNEL_NUM - 1)  # 2-phase jammer
+        jammed_channel = t % configs.CHANNEL_NUM  # 3-phase jammer
+        # jammed_channel = t % (configs.CHANNEL_NUM - 1)  # 2-phase jammer
         # jammed_channel = 0  # fixed jammer
         a[jammed_channel] = 1.0
         a = a * self.power
