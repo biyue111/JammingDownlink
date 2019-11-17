@@ -19,7 +19,7 @@ class BSAgent:
         self.state_dim = state_dim
         # print(self.act_dim, self.state_dim)
         self.brain = DDPG(self.act_dim, self.state_dim, act_range)
-        self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim, n_steps_annealing=80)
+        self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim, n_steps_annealing=100)
         self.virtual_action_step = configs.VIRTUAL_ACTION_STEP
 
     def act(self, s, t):
@@ -41,7 +41,7 @@ class BSAgent:
         noise = self.noise.generate(t)
         print("Noise: ", noise)
         a = np.clip(a_no_noise_raw + noise, -self.act_range, self.act_range)
-        a = self.brain.get_discrete_action(s, a)
+        a = self.brain.get_target_discrete_action(s, a)
         # ------- Fix action -------
         if fix_power_flag == 1:
             for i in range(configs.CHANNEL_NUM):
@@ -123,10 +123,6 @@ class BSAgent:
 
     def memorize(self, old_state, a, r, new_state):
         self.brain.memorize(old_state, a, r, new_state)
-
-    # def pre_train(self, states, bs_actions, rewards):
-    #     Generate pre-train data
-        # self.brain.pre_train(states, bs_actions, rewards, states)
 
     def get_virtual_actions(self, real_raw_action):
         # Generate virtual actions
