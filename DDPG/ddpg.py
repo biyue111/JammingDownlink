@@ -54,6 +54,44 @@ class DDPG:
 
         v_ls = np.zeros(len(candidate_a_ls))
         for i in range(len(candidate_a_ls)):
+            v_ls[i] = self.critic.q_value(np.expand_dims(s, axis=0),
+                                           np.expand_dims(candidate_a_ls[i], axis=0))
+        best_a_key = 0
+        greatest_v = v_ls[0]
+        for i in range(len(candidate_disc_a_ls)):
+            if v_ls[i] >= greatest_v:
+                best_a_key = i
+                greatest_v = v_ls[i]
+        result_a = candidate_a_ls[best_a_key]
+        # print("get_discrete_action")
+        # print(raw_a, candidate_disc_a_ls, v_ls, result_a)
+        return result_a
+
+    def get_discrete_actions(self, s_batch, raw_a_batch):
+        result_a_batch = np.zeros((len(raw_a_batch), len(raw_a_batch[0])))
+        for i in range(len(raw_a_batch)):
+            result_a_batch[i] = self.get_discrete_action(s_batch[i], raw_a_batch[i])
+        return result_a_batch
+
+    def get_target_discrete_action(self, s, raw_a):
+        # Get discrete action with Wolpertinger Policy
+        action_element_list = np.array([])
+        for i in range(configs.CHANNEL_NUM, configs.CHANNEL_NUM + configs.USER_NUM):
+            tmp_element = raw_channel_to_2raw_channels(raw_a[i])
+            if i == configs.CHANNEL_NUM:
+                action_element_list = tmp_element
+            else:
+                action_element_list = np.vstack((action_element_list, tmp_element))
+        # print("action_element_list: ", action_element_list)
+        candidate_disc_a_ls = combination(action_element_list, 0)
+        # print("candidate_disc_a_ls: ", candidate_disc_a_ls)
+        candidate_a_ls = np.zeros((len(candidate_disc_a_ls), configs.CHANNEL_NUM + configs.USER_NUM))
+        continuous_a_ls = raw_a[0:configs.CHANNEL_NUM]
+        for i in range(len(candidate_a_ls)):
+            candidate_a_ls[i] = np.hstack((continuous_a_ls, candidate_disc_a_ls[i]))
+
+        v_ls = np.zeros(len(candidate_a_ls))
+        for i in range(len(candidate_a_ls)):
             v_ls[i] = self.critic.target_q(np.expand_dims(s, axis=0),
                                            np.expand_dims(candidate_a_ls[i], axis=0))
         best_a_key = 0
@@ -67,11 +105,17 @@ class DDPG:
         # print(raw_a, candidate_disc_a_ls, v_ls, result_a)
         return result_a
 
+    def get_target_discrete_actions(self, s_batch, raw_a_batch):
+        result_a_batch = np.zeros((len(raw_a_batch), len(raw_a_batch[0])))
+        for i in range(len(raw_a_batch)):
+            result_a_batch[i] = self.get_target_discrete_action(s_batch[i], raw_a_batch[i])
+        return result_a_batch
+
     def policy_action(self, s):
         """ Use the actor to do an action with the state
         """
         a = self.actor.target_action(s)
-        a = self.get_discrete_action(s, a)
+        a = self.get_target_discrete_action(s, a)
         return a
 
     def bellman(self, rewards, q_values):
@@ -156,7 +200,7 @@ class DDPG:
         # Train actor
         if actor_needed_update_flag == 1:
             self.actor.transfer_target_to_estimation()
-            for i in range(5):
+            for i in range(20):
                 self.actor.initial_channel_selection_net()
                 for e in range(500):
                     actions_grad = self.actor.actions(states)
@@ -166,10 +210,15 @@ class DDPG:
                     self.actor.train_channel_selection(q_grads, states)
 
                 # Transfer weights to target networks at rate Tau
-                states10, actions10, rewards10, new_states10 = self.last_10_buffer.sample_batch(10)
-                q_values_tc10 = self.critic.target_q(states10, self.actor.target_actions(states10))
-                q_values_c10 = self.critic.target_q(states10, self.actor.actions(states10))
-                print("Episode:", i, "Q-value of target critic and critic: ", sum(q_values_tc10), sum(q_values_c10))
+                states10, actions10, rewards10, new_states10 = self.last_10_buffer.order_sample_all()
+                target_actions = self.get_target_discrete_actions(states10, self.actor.target_actions(states10))
+                q_values_tc10 = self.critic.target_q(states10, target_actions)
+                estimation_actions = self.get_discrete_actions(states10, self.actor.actions(states10))
+                q_values_c10 = self.critic.target_q(states10, estimation_actions)
+                # print(actions10)
+                # print(self.actor.target_actions(states10))
+                print("Episode:", i, "Q-value of target critic: ", [q for q in q_values_tc10[:, 0]])
+                print("Episode:", i, "Q-value of critic: ", [q for q in q_values_c10[:, 0]])
                 if sum(q_values_tc10) < sum(q_values_c10):
                     self.actor.update_target()
                     print("\033[1;33m[Info] Actor channel selection target updated. \033[0m")

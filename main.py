@@ -90,7 +90,7 @@ class Environment:
                     bs_agent.memorize(old_state, bs_raw_a_ls, r, new_state)
                 bs_agent.brain.last_10_buffer.memorize(old_state, bs_raw_a_ls, r, new_state)
 
-            if e % 5 == 0:
+            if e % 5 == 0 and e > configs.BEGIN_TRAINING_EPISONDE:
                 bs_agent.update_brain_channel_selection(e, jammed_flag_list)
             """ Update using virtual data """
 
