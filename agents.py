@@ -19,7 +19,7 @@ class BSAgent:
         self.state_dim = state_dim
         # print(self.act_dim, self.state_dim)
         self.brain = DDPG(self.act_dim, self.state_dim, act_range)
-        self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim, n_steps_annealing=310)
+        self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim, n_steps_annealing=100)
         self.virtual_action_step = configs.VIRTUAL_ACTION_STEP
 
     def act(self, s, t):
@@ -41,7 +41,7 @@ class BSAgent:
         noise = self.noise.generate(t)
         print("Noise: ", noise)
         a = np.clip(a_no_noise_raw + noise, -self.act_range, self.act_range)
-        a = self.brain.get_discrete_action(s, a)
+        a = self.brain.get_target_discrete_action(s, a)
         # ------- Fix action -------
         if fix_power_flag == 1:
             for i in range(configs.CHANNEL_NUM):
@@ -95,13 +95,6 @@ class BSAgent:
                 needed_flag = 1
         return needed_flag
 
-    # def update_brain_channel_selection(self, episode, jammed_flag_list):
-    #     actor_needed_update_flag = self.is_needed_update_channel_selection_actor(episode, jammed_flag_list)
-    #     if self.brain.buffer.count > configs.BATCH_SIZE:
-    #         if actor_needed_update_flag == 1:
-    #             print("\033[0;33m[Info] Need channel selection actor update. \033[0m")
-    #         self.brain.train_channel_selection_transfer(actor_needed_update_flag)
-
     def is_needed_update_power_allocation_actor(self, episode, power_list, channel_list):
         needed_flag = 0
         for i in range(10):
@@ -117,9 +110,6 @@ class BSAgent:
             if useless_power * 100.0 >= configs.BS_MAX_POWER:
                 needed_flag = 1
         return needed_flag
-
-    # def virtual_update_brain(self, states, bs_actions, rewards, next_states):
-    #     self.brain.virtual_train(states, bs_actions, rewards, next_states)
 
     def memorize(self, old_state, a, r, new_state):
         self.brain.memorize(old_state, a, r, new_state)
