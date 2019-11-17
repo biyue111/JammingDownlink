@@ -19,7 +19,7 @@ class BSAgent:
         self.state_dim = state_dim
         # print(self.act_dim, self.state_dim)
         self.brain = DDPG(self.act_dim, self.state_dim, act_range)
-        self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim, n_steps_annealing=310)
+        self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim, n_steps_annealing=80)
         self.virtual_action_step = configs.VIRTUAL_ACTION_STEP
 
     def act(self, s, t):
