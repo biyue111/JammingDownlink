@@ -141,8 +141,24 @@ class DDPG:
         """ Update actor and critic networks from sampled experience
         """
         # Train critic
-        for e in range(3000):
-            self.critic.train(critic_target, states, actions)
+        for e in range(1000):
+            loss = self.critic.train(critic_target, states, actions)
+            if loss < 0.02:
+                break
+            if e % 200 == 0:
+                # losses.append(loss)
+                print("The loss of critic: ", loss)
+        self.critic.update_target()
+
+        print("critic target test:------------")
+        t_q_values = self.critic.target_q(states, actions)
+        for i in range(len(actions)):
+            delta = t_q_values[i] - critic_target[i]
+            if delta >= 2.0:
+                print([round(k, 2) for k in states[i]],
+                      [round(k, 2) for k in actions[i]],
+                      round(critic_target[i][0], 2),
+                      round(t_q_values[i][0], 2))
 
         # Q-Value Gradients under Current Policy
         actions_grad = self.actor.actions(states)
@@ -150,7 +166,8 @@ class DDPG:
         # print("Gradient: ", grads)
 
         # Train actor
-        for e in range(6000):
+        self.actor.initial_network()
+        for e in range(500):
             actions_grad = self.actor.actions(states)
             q_grads = self.critic.gradients(states, actions_grad)
             self.actor.train(q_grads, states)
