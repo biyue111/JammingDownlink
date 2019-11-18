@@ -115,7 +115,7 @@ class DDPG:
         """ Use the actor to do an action with the state
         """
         a = self.actor.target_action(s)
-        a = self.get_discrete_action(s, a)
+        a = self.get_target_discrete_action(s, a)
         return a
 
     def bellman(self, rewards, q_values):
@@ -166,13 +166,26 @@ class DDPG:
         # print("Gradient: ", grads)
 
         # Train actor
-        for e in range(500):
-            actions_grad = self.actor.actions(states)
-            q_grads = self.critic.gradients(states, actions_grad)
-            self.actor.train(q_grads, states)
+        for i in range(10):
+            self.actor.initial_network()
+            for e in range(200):
+                actions_grad = self.actor.actions(states)
+                q_grads = self.critic.gradients(states, actions_grad)
+                self.actor.train(q_grads, states)
 
-        # Transfer weights to target networks at rate Tau
-        self.actor.update_target()
+            # Transfer weights to target networks at rate Tau
+            states10, actions10, rewards10, new_states10 = self.last_10_buffer.order_sample_all()
+            target_actions = self.get_target_discrete_actions(states10, self.actor.target_actions(states10))
+            q_values_tc10 = self.critic.target_q(states10, target_actions)
+            estimation_actions = self.get_discrete_actions(states10, self.actor.actions(states10))
+            q_values_c10 = self.critic.target_q(states10, estimation_actions)
+            # print(actions10)
+            # print(self.actor.target_actions(states10))
+            print("Episode:", i, "Q-value of target critic: ", [q for q in q_values_tc10[:, 0]])
+            print("Episode:", i, "Q-value of critic: ", [q for q in q_values_c10[:, 0]])
+            if sum(q_values_tc10) < sum(q_values_c10):
+                self.actor.update_target()
+                print("\033[1;33m[Info] Actor channel selection target updated. \033[0m")
 
     def train(self):
         # Sample experience from buffer
@@ -184,59 +197,59 @@ class DDPG:
         # Train both networks on sampled batch, update target networks
         self.update_models(states, actions, critic_target)
 
-    def train_channel_selection_transfer(self, actor_needed_update_flag):
+    # def train_channel_selection_transfer(self, actor_needed_update_flag):
         # Sample experience from buffer
-        states, actions, rewards, new_states = self.sample_batch(configs.BATCH_SIZE)
+        # states, actions, rewards, new_states = self.sample_batch(configs.BATCH_SIZE)
         # Predict target q-values using target networks
-        q_values = self.critic.target_q(new_states, self.actor.target_actions(new_states))
+        # q_values = self.critic.target_q(new_states, self.actor.target_actions(new_states))
         # Compute critic target
-        critic_target = self.bellman(rewards, q_values)
+        # critic_target = self.bellman(rewards, q_values)
         # Train critic
         # losses = []
-        for e in range(1000):
-            loss = self.critic.train_state_com(critic_target, states, actions)
-            if loss < 0.02:
-                break
-            if e % 200 == 0:
+        # for e in range(1000):
+        #     loss = self.critic.train_state_com(critic_target, states, actions)
+        #     if loss < 0.02:
+        #         break
+        #     if e % 200 == 0:
                 # losses.append(loss)
-                print("The loss of critic: ", loss)
-        self.critic.update_target()
+                # print("The loss of critic: ", loss)
+        # self.critic.update_target()
 
-        print("critic target test:------------")
-        t_q_values = self.critic.target_q(states, actions)
-        for i in range(len(actions)):
-            delta = t_q_values[i] - rewards[i]
-            if delta >= 2.0:
-                print([round(k, 2) for k in states[i]],
-                      [round(k, 2) for k in actions[i]],
-                      round(critic_target[i][0], 2),
-                      round(t_q_values[i][0], 2))
-
-        # Train actor
-        if actor_needed_update_flag == 1:
-            self.actor.transfer_target_to_estimation()
-            for i in range(5):
-                self.actor.initial_channel_selection_net()
-                for e in range(500):
-                    actions_grad = self.actor.actions(states)
-                    # if e % 100 == 0:
-                        # print("Episod: ", e+1, " 1st action: ", [round(i, 4) for i in actions_grad[0]])
-                    q_grads = self.critic.gradients(states, actions_grad)
-                    self.actor.train_channel_selection(q_grads, states)
-
-                # Transfer weights to target networks at rate Tau
-                states10, actions10, rewards10, new_states10 = self.last_10_buffer.order_sample_all()
-                target_actions = self.get_target_discrete_actions(states10, self.actor.target_actions(states10))
-                q_values_tc10 = self.critic.target_q(states10, target_actions)
-                estimation_actions = self.get_discrete_actions(states10, self.actor.actions(states10))
-                q_values_c10 = self.critic.target_q(states10, estimation_actions)
-                # print(actions10)
-                # print(self.actor.target_actions(states10))
-                print("Episode:", i, "Q-value of target critic: ", [q for q in q_values_tc10[:, 0]])
-                print("Episode:", i, "Q-value of critic: ", [q for q in q_values_c10[:, 0]])
-                if sum(q_values_tc10) < sum(q_values_c10):
-                    self.actor.update_target()
-                    print("\033[1;33m[Info] Actor channel selection target updated. \033[0m")
+        # print("critic target test:------------")
+        # t_q_values = self.critic.target_q(states, actions)
+        # for i in range(len(actions)):
+        #     delta = t_q_values[i] - rewards[i]
+        #     if delta >= 2.0:
+        #         print([round(k, 2) for k in states[i]],
+        #               [round(k, 2) for k in actions[i]],
+        #               round(critic_target[i][0], 2),
+        #               round(t_q_values[i][0], 2))
+        #
+        # # Train actor
+        # if actor_needed_update_flag == 1:
+        #     self.actor.transfer_target_to_estimation()
+        #     for i in range(5):
+        #         self.actor.initial_channel_selection_net()
+        #         for e in range(500):
+        #             actions_grad = self.actor.actions(states)
+        #             # if e % 100 == 0:
+        #                 # print("Episod: ", e+1, " 1st action: ", [round(i, 4) for i in actions_grad[0]])
+        #             q_grads = self.critic.gradients(states, actions_grad)
+        #             self.actor.train_channel_selection(q_grads, states)
+        #
+        #         # Transfer weights to target networks at rate Tau
+        #         states10, actions10, rewards10, new_states10 = self.last_10_buffer.order_sample_all()
+        #         target_actions = self.get_target_discrete_actions(states10, self.actor.target_actions(states10))
+        #         q_values_tc10 = self.critic.target_q(states10, target_actions)
+        #         estimation_actions = self.get_discrete_actions(states10, self.actor.actions(states10))
+        #         q_values_c10 = self.critic.target_q(states10, estimation_actions)
+        #         # print(actions10)
+        #         # print(self.actor.target_actions(states10))
+        #         print("Episode:", i, "Q-value of target critic: ", [q for q in q_values_tc10[:, 0]])
+        #         print("Episode:", i, "Q-value of critic: ", [q for q in q_values_c10[:, 0]])
+        #         if sum(q_values_tc10) < sum(q_values_c10):
+        #             self.actor.update_target()
+        #             print("\033[1;33m[Info] Actor channel selection target updated. \033[0m")
 
     def pre_train(self, states, actions, rewards, new_states, a_channels):
         # Predict target q-values using target networks

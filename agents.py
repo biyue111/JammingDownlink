@@ -84,9 +84,8 @@ class BSAgent:
     def update_brain(self, episode, jammed_flag_list, power_list, channel_list):
         needed_channel_selection = self.is_needed_update_channel_selection_actor(episode, jammed_flag_list)
         needed_power_allocation = self.is_needed_update_power_allocation_actor(episode, power_list, channel_list)
-        if self.brain.buffer.count > configs.BATCH_SIZE:
-            if needed_channel_selection or needed_power_allocation:
-                self.brain.train()
+        if needed_channel_selection or needed_power_allocation:
+            self.brain.train()
 
     def is_needed_update_channel_selection_actor(self, episode, jammed_flag_list):
         needed_flag = 0

@@ -20,15 +20,12 @@ class Actor:
         # Create network and target network
         self.state_input, self.action_output, \
         self.net = self.create_network(state_dim, action_dim)
-        self.channel_selection_net = self.net[0:6]
-        self.power_allocation_net = self.net[6:12]
 
         self.target_state_input, self.target_action_output, \
         self.target_update, self.target_net = self.create_target_network(state_dim, action_dim, self.net)
 
         print("self.net: ", self.net)
-        self.init_channel_selection = tf.initialize_variables(self.channel_selection_net)
-        self.init_power_allocation = tf.initialize_variables(self.power_allocation_net)
+        self.init_net = tf.initialize_variables(self.net)
 
         self.target_to_estimation = [tf.assign(e, t) for e, t in zip(self.net, self.target_net)]
 
@@ -49,11 +46,6 @@ class Actor:
         self.channel_selection_optimizer = \
             tf.train.AdamOptimizer(self.lr).apply_gradients(zip(self.channel_selection_parameters_gradients, self.net[0:6]))
 
-        self.power_allocation_parameters_gradients = tf.gradients(self.action_output,
-                                                                  self.power_allocation_net, -self.q_gradient_input)
-        self.power_allocation_optimizer = \
-            tf.train.AdamOptimizer(self.lr).apply_gradients(zip(self.power_allocation_parameters_gradients,
-                                                                self.power_allocation_net))
         # lower network (power allocation) optimizer
         ## regularization l2norm
         # weight_decay = tf.add_n([1e-3 * tf.nn.l2_loss(var) for var in self.net])
@@ -115,11 +107,8 @@ class Actor:
 
         return state_input, action_output, target_update, target_net
 
-    def initial_channel_selection_net(self):
-        self.sess.run(self.init_channel_selection)
-
-    def initial_power_allocation_net(self):
-        self.sess.run(self.init_power_allocation)
+    def initial_network(self):
+        self.sess.run(self.init_net)
 
     def update_target(self):
         self.sess.run(self.target_update, feed_dict={
@@ -138,11 +127,6 @@ class Actor:
 
     def train_channel_selection(self, q_gradient_batch, state_batch):
         self.sess.run(self.channel_selection_optimizer, feed_dict={
-            self.q_gradient_input: q_gradient_batch,
-            self.state_input: state_batch})
-
-    def train_power_allocation(self, q_gradient_batch, state_batch):
-        self.sess.run(self.power_allocation_optimizer, feed_dict={
             self.q_gradient_input: q_gradient_batch,
             self.state_input: state_batch})
 
