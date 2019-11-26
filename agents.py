@@ -19,7 +19,7 @@ class BSAgent:
         self.state_dim = state_dim
         # print(self.act_dim, self.state_dim)
         self.brain = DDPG(self.act_dim, self.state_dim, act_range)
-        self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim, n_steps_annealing=100)
+        self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim, n_steps_annealing=150)
         self.virtual_action_step = configs.VIRTUAL_ACTION_STEP
 
     def act(self, s, t):
@@ -37,6 +37,16 @@ class BSAgent:
         print("Real a estimation directly from brain:" + str(a_es))
         v = self.brain.critic.target_q(np.expand_dims(s, axis=0), np.expand_dims(a_no_noise_raw, axis=0))
         print("Value of the chosen action:", v)
+        tested_a_ls = np.arange(-1.0, 1.1, 0.05)
+        a_idx = configs.CHANNEL_NUM
+        v_ls = np.zeros(len(tested_a_ls))
+        for i in range(len(tested_a_ls)):
+            test_a_no_noise_raw = np.array([k for k in a_no_noise_raw])
+            test_a_no_noise_raw[a_idx] = tested_a_ls[i]
+            v_ls[i] = self.brain.critic.target_q(np.expand_dims(s, axis=0), np.expand_dims(test_a_no_noise_raw, axis=0))
+        print(tested_a_ls)
+        print(v_ls)
+
         # ------- Add Noise -------
         noise = self.noise.generate(t)
         print("Noise: ", noise)
