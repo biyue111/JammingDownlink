@@ -1,6 +1,6 @@
 import sys
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 
 import configs as configs
 from .actor import Actor
@@ -22,6 +22,7 @@ class DDPG:
         """ Initialization
         """
         # Environment and A2C parameters
+        tf.disable_eager_execution()
         self.act_dim = act_dim
         self.act_range = act_range
         self.state_dim = env_dim
