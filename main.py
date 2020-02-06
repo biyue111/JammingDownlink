@@ -22,6 +22,20 @@ class Environment:
         self.pre_train_rewards = []
         self.pre_train_states = []
 
+    def write_output_file(self, file_name, records):
+        row_num = records.shape[0]
+        shape_len = len(records.shape)
+        csv_file = open(file_name, 'w', newline='')
+        writer = csv.writer(csv_file)
+        if shape_len == 1:
+            writer.writerow(records)
+        else:
+            col_num = records.shape[1]
+            for i in range(col_num):
+                record = [records[j][i] for j in range(row_num)]
+                writer.writerow(record)
+        csv_file.close()
+
     def bs_pre_train(self, bs_agent, s):
         # Generate actions
         print("------------Begin pre-train------------")
@@ -48,7 +62,7 @@ class Environment:
         bs_agent.pre_train(np.array(self.pre_train_states), np.array(self.pre_train_bs_raw_actions),
                            np.array(self.pre_train_rewards), np.array(a_channel_test_list))
 
-    def run(self, bs_agent, jmr_agent):
+    def run(self, bs_agent, jmr_agent, scenario_name, model_name, experiment_num):
         # tqdm_e = tqdm(range(configs.UPDATE_NUM), desc='Score', leave=True, unit=" episodes")
         # print(configs.RAW_CHANNEL_LIST)
         old_state = self.env.get_init_state()
@@ -127,35 +141,49 @@ class Environment:
         print("BS station buffer")
         bs_agent.brain.buffer.print_buffer()
         # ---------- Save models ----------
-        bs_agent.save_brain("results/save_net.ckpt")
-        # --------- Print results ---------
+        # bs_agent.save_brain("results/save_net.ckpt")
+        # --------- Write output file ---------
+        output_prefix = 'temp_results/' + scenario_name + '/' + model_name + '/' + str(experiment_num) + '_'
+        print('write output files to: ', output_prefix)
         # Write reward and success rate to a csv file
-        csv_file = open('CHACNet Reward list.csv', 'w', newline='')
-        writer = csv.writer(csv_file)
-        writer.writerow(reward_list)
-        csv_file.close()
-        csv_file = open('CHACNet jammed flag list.csv', 'w', newline='')
-        writer = csv.writer(csv_file)
-        writer.writerow(jammed_flag_list)
-        csv_file.close()
-        csv_file = open('CHACNet state records.csv', 'w', newline='')
-        writer = csv.writer(csv_file)
-        for i in range(bs_agent.state_dim):
-            state_record = [state_records[j][i] for j in range(configs.UPDATE_NUM)]
-            writer.writerow(state_record)
-        csv_file.close()
-        csv_file = open('CHACNet power allocation records.csv', 'w', newline='')
-        writer = csv.writer(csv_file)
-        for i in range(configs.CHANNEL_NUM):
-            power_allocation_record = [power_allocation_records[j][i] for j in range(configs.UPDATE_NUM)]
-            writer.writerow(power_allocation_record)
-        csv_file.close()
-        csv_file = open('CHACNet channel choosing records.csv', 'w', newline='')
-        writer = csv.writer(csv_file)
-        for i in range(configs.USER_NUM):
-            state_record = [state_records[j][i] for j in range(configs.UPDATE_NUM)]
-            writer.writerow(state_record)
-        csv_file.close()
+        # csv_file = open('CHACNet Reward list.csv', 'w', newline='')
+        # writer = csv.writer(csv_file)
+        # writer.writerow(reward_list)
+        # csv_file.close()
+        self.write_output_file(output_prefix + 'Reward_list.csv', reward_list)
+        # csv_file = open('CHACNet jammed flag list.csv', 'w', newline='')
+        # writer = csv.writer(csv_file)
+        # writer.writerow(jammed_flag_list)
+        # csv_file.close()
+        self.write_output_file(output_prefix + 'jammed_flag_list.csv', jammed_flag_list)
+        # csv_file = open('CHACNet state records.csv', 'w', newline='')
+        # writer = csv.writer(csv_file)
+        #         # for i in range(bs_agent.state_dim):
+        #         #     state_record = [state_records[j][i] for j in range(configs.UPDATE_NUM)]
+        #         #     writer.writerow(state_record)
+        # csv_file.close()
+        self.write_output_file(output_prefix + 'state_records.csv', state_records)
+        # csv_file = open('CHACNet power allocation records.csv', 'w', newline='')
+        # writer = csv.writer(csv_file)
+        # for i in range(configs.CHANNEL_NUM):
+        #     power_allocation_record = [power_allocation_records[j][i] for j in range(configs.UPDATE_NUM)]
+        #     writer.writerow(power_allocation_record)
+        # csv_file.close()
+        self.write_output_file(output_prefix + 'power_allocation_records.csv', power_allocation_records)
+        # csv_file = open('CHACNet channel choosing records.csv', 'w', newline='')
+        # writer = csv.writer(csv_file)
+        # for i in range(configs.USER_NUM):
+        #     state_record = [state_records[j][i] for j in range(configs.UPDATE_NUM)]
+        #     writer.writerow(state_record)
+        # csv_file.close()
+        self.write_output_file(output_prefix + 'channel_choosing_records.csv', user_channel_choosing_records)
+
+
+def write_log(scenario_name, model_name):
+    log_file_name = 'temp_results/' + scenario_name + '/' + model_name + '/log.txt'
+    log_file = open(log_file_name, 'w', newline='')
+    log_file.write('This is a log file')
+    log_file.close()
 
 
 # -------------------- MAIN ----------------------------
@@ -164,7 +192,14 @@ bs_act_dim = configs.CHANNEL_NUM + configs.USER_NUM
 env = Environment(bs_state_dim=bs_state_dim, bs_act_dim=bs_act_dim)
 base_station_agent = BSAgent(act_range=1.0, state_dim=bs_state_dim, act_dim=bs_act_dim)
 jammer_agent = JMRAgent()
-try:
-    env.run(base_station_agent, jammer_agent)
-finally:
-    pass
+
+scenario_name = 'downlink_basic'
+model_name = 'DDPG_PNN_SEQ'
+experiment_num = 10
+
+write_log(scenario_name, model_name)
+for i in range(experiment_num):
+    try:
+        env.run(base_station_agent, jammer_agent, scenario_name, model_name, i)
+    finally:
+        pass

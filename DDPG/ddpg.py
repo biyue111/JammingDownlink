@@ -201,7 +201,7 @@ class DDPG:
         # Train actor
         if actor_needed_update_flag == 1:
             self.actor.transfer_target_to_estimation()
-            for i in range(20):
+            for i in range(1):
                 self.actor.initial_channel_selection_net()
                 for e in range(500):
                     actions_grad = self.actor.actions(states)
@@ -234,7 +234,7 @@ class DDPG:
         a_channels = actions10[:, configs.CHANNEL_NUM:self.act_dim]
         # print(a_channels)
         self.actor.transfer_target_to_estimation()
-        for i in range(40):
+        for i in range(1):
             self.actor.initial_pre_power_allocation_net()
             for e in range(500):
                 pre_power_actions_grad = self.actor.pre_power_actions(a_channels)
@@ -282,7 +282,7 @@ class DDPG:
         # Train actor
         states10, actions10, rewards10, new_states10 = self.last_10_buffer.sample_batch(10)
         self.actor.transfer_target_to_estimation()
-        for i in range(40):
+        for i in range(1):
             self.actor.initial_power_allocation_net()
             for e in range(200):
                 actions_grad = self.actor.actions(states10)
