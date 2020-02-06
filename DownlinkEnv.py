@@ -55,9 +55,10 @@ class DownlinkEnv:
         user_num_ls = np.zeros(self.channel_num)
         datarate_ls = np.zeros(self.user_num)
         sinr_ls = np.zeros(self.user_num)
-        jammed_penalty = -5
-        min_reward = -2
-        congested_user_reward_offset = 0
+        jammed_penalty = -5.0
+        useless_power_penalty = -1.0
+        min_reward = -2.0
+        congested_user_reward_offset = 0.0
         # channel_availability[i][j] = 1: channel i is available for user j
         channel_availability = np.ones((self.channel_num, self.user_num))
         # calculate number of user in one channel

@@ -1,6 +1,6 @@
 import sys
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 
 import configs as configs
 from .actor import Actor
@@ -22,6 +22,7 @@ class DDPG:
         """ Initialization
         """
         # Environment and A2C parameters
+        tf.disable_eager_execution()
         self.act_dim = act_dim
         self.act_range = act_range
         self.state_dim = env_dim
@@ -166,9 +167,9 @@ class DDPG:
         # print("Gradient: ", grads)
 
         # Train actor
-        for i in range(10):
+        for i in range(1):
             self.actor.initial_network()
-            for e in range(200):
+            for e in range(500):
                 actions_grad = self.actor.actions(states)
                 q_grads = self.critic.gradients(states, actions_grad)
                 self.actor.train(q_grads, states)
