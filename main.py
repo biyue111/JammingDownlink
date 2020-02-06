@@ -3,153 +3,203 @@ from DDPG.ddpg import *
 from DownlinkEnv import *
 import configs as configs
 from tqdm import tqdm
-from utils.utilFunc import OrnsteinUhlenbeckProcess
+from utils.utilFunc import *
 import matplotlib.pyplot as plt
-
-
-# -------------------- BS agent ------------------------
-class BSAgent:
-    def __init__(self, act_range):
-        # Create a ddpg network with
-        # actions: [power allocation in each channel, channel chosen for each user]
-        # states: [user position (x, y), channel chosen, data_rate] * number of user
-        # action range: [0, 1]
-        self.max_power = configs.BS_MAX_POWER
-        self.act_range = act_range
-        self.act_dim = configs.CHANNEL_NUM + configs.USER_NUM
-        self.state_dim = 4 * configs.USER_NUM
-        # print(self.act_dim, self.state_dim)
-        self.brain = DDPG(self.act_dim, self.state_dim, act_range)
-        self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim)
-
-    def act(self, s, t):
-        # print("The state:" + str(s))
-        a = self.brain.policy_action(s)
-        # Clip continuous values to be valid w.r.t. environment
-        print("a directly from brain:" + str(a))
-        v = self.brain.critic.target_predict([np.expand_dims(s, axis=0), np.expand_dims(a, axis=0)])
-        print("Value of action:", v)
-        a = np.clip(a + self.noise.generate(t), -self.act_range, self.act_range)
-        return a
-
-    def get_real_action(self, raw_a):
-        #  return "real" action: [power_allocation_ls, user_channel_ls]
-        raw_power_allocation = raw_a[0:configs.CHANNEL_NUM]
-        raw_user_channel_ls = raw_a[configs.CHANNEL_NUM:configs.CHANNEL_NUM+configs.USER_NUM]
-        # Normalization
-        raw_power_allocation = [(raw_power_allocation[i] + self.act_range)/(2*self.act_range)
-                                for i in range(configs.CHANNEL_NUM)]
-        raw_user_channel_ls = [(raw_user_channel_ls[i] + self.act_range)/(2*self.act_range)
-                               for i in range(configs.USER_NUM)]
-        # Calculate the meaningful action (power and channel chosen)
-        if sum(raw_power_allocation) == 0:
-            power_allocation_ls = [self.max_power / configs.CHANNEL_NUM for _ in range(configs.CHANNEL_NUM)]
-        else:
-            power_allocation_ls = [raw_power_allocation[i] * self.max_power / sum(raw_power_allocation)
-                                   for i in range(configs.CHANNEL_NUM)]
-        user_channel_ls = [math.floor(raw_user_channel_ls[i] * configs.CHANNEL_NUM) for i in range(configs.USER_NUM)]
-        for i in range(configs.USER_NUM):
-            if user_channel_ls[i] >= configs.CHANNEL_NUM:
-                user_channel_ls[i] = configs.CHANNEL_NUM - 1
-        return [power_allocation_ls, user_channel_ls]
-
-    def update_brain(self):
-        if self.brain.buffer.count > configs.BATCH_SIZE:
-            self.brain.train()
-
-    def memorize(self, old_state, a, r, new_state):
-        self.brain.memorize(old_state, a, r, new_state)
-
-    def critic_test(self, s):
-        a_c = 0.7
-        a = np.array([[1, 1, 1, -a_c, -a_c], [1, 1, 1, -a_c, a_c],
-                      [1, 1, 1, a_c, -a_c], [1, 1, 1, a_c, a_c]])
-        v = np.zeros(len(a))
-        for i in range(len(a)):
-            v[i] = self.brain.critic.target_predict([np.expand_dims(s, axis=0), np.expand_dims(a[i], axis=0)])
-        print("The value of pairs: ", v)
-
-
-# -------------------- JAMMER AGENT --------------------
-class JMRAgent:
-    def __init__(self):
-        self.power = configs.JAMMER_POWER
-
-    def act(self, s, t):
-        a = self.power * np.zeros(configs.CHANNEL_NUM)
-        return a
+import csv
+from agents import *
 
 
 # -------------------- ENVIRONMENT ---------------------
 class Environment:
-    def __init__(self):
+    def __init__(self, bs_state_dim, bs_act_dim):
         self.pick_times = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         self.overall_step = 0.000
         self.hundred_step = [0.000 for x in range(0, 100)]
         self.env = DownlinkEnv()
+        self.bs_state_dim = bs_state_dim
+        self.bs_act_dim = bs_act_dim
+        self.pre_train_bs_raw_actions = []
+        self.pre_train_rewards = []
+        self.pre_train_states = []
 
-    def run(self, bs_agent, jmr_agent):
-        tqdm_e = tqdm(range(configs.UPDATE_NUM), desc='Score', leave=True, unit=" episodes")
+    def write_output_file(self, file_name, records):
+        row_num = records.shape[0]
+        shape_len = len(records.shape)
+        csv_file = open(file_name, 'w', newline='')
+        writer = csv.writer(csv_file)
+        if shape_len == 1:
+            writer.writerow(records)
+        else:
+            col_num = records.shape[1]
+            for i in range(col_num):
+                record = [records[j][i] for j in range(row_num)]
+                writer.writerow(record)
+        csv_file.close()
+
+    def bs_pre_train(self, bs_agent, s):
+        # Generate actions
+        print("------------Begin pre-train------------")
+        ch_step = 2.0 / (1.0 * configs.CHANNEL_NUM)  # The "wide" of a channel
+        a_channels = configs.RAW_CHANNEL_LIST
+        a_channel_list = np.array(np.meshgrid(a_channels, a_channels, a_channels)).T.reshape(-1, 3)
+        power_step = 0.2
+        a_powers = np.arange(-1.0, 1 + power_step, power_step)
+        a_power_list = np.array(np.meshgrid(a_powers, a_powers, a_powers)).T.reshape(-1, 3)
+        jmr_a = np.zeros(configs.CHANNEL_NUM)
+        for i in range(len(a_power_list)):
+            for j in range(len(a_channel_list)):
+                bs_raw_a = np.hstack((a_power_list[i], a_channel_list[j]))
+                bs_a = bs_agent.get_real_action(bs_raw_a)
+                jamming_flag, r, new_s = self.env.step([bs_a, jmr_a])
+                self.pre_train_bs_raw_actions.append(bs_raw_a)
+                self.pre_train_rewards.append(r)
+                self.pre_train_states.append(s)
+        a_channel_test_list = [[a_channels[0], a_channels[1], a_channels[1]],
+                               [a_channels[0], a_channels[2], a_channels[0]],
+                               [a_channels[2], a_channels[1], a_channels[1]]]
+        # bs_agent.pre_train(np.array(self.pre_train_states), np.array(self.pre_train_bs_raw_actions),
+        #                    np.array(self.pre_train_rewards), np.array(a_channel_list))
+        bs_agent.pre_train(np.array(self.pre_train_states), np.array(self.pre_train_bs_raw_actions),
+                           np.array(self.pre_train_rewards), np.array(a_channel_test_list))
+
+    def run(self, bs_agent, jmr_agent, scenario_name, model_name, experiment_num):
+        # tqdm_e = tqdm(range(configs.UPDATE_NUM), desc='Score', leave=True, unit=" episodes")
+        # print(configs.RAW_CHANNEL_LIST)
         old_state = self.env.get_init_state()
         records = np.zeros(configs.UPDATE_NUM)
-        for e in range(configs.UPDATE_NUM):
-            # print("e:", e)
-            # bs_distribution = bs_agent.brain.get_distribution(s)
-            # print("bs_distribution: ", bs_distribution)
-            # jammer_distribution = jammer_agent. brain.get_distribution(s)
-            # print("jammer_distribution: ", jammer_distribution)
-            # bs_r = self.env.step([action_ls])
 
+        jammed_flag_list = np.zeros(configs.UPDATE_NUM)
+        reward_list = np.zeros(configs.UPDATE_NUM)
+        state_records = np.zeros((configs.UPDATE_NUM, bs_agent.state_dim))
+        power_allocation_records = np.zeros((configs.UPDATE_NUM, configs.CHANNEL_NUM))
+        user_channel_choosing_records = np.zeros((configs.UPDATE_NUM, configs.USER_NUM))
+
+        self.bs_pre_train(bs_agent, old_state)
+        for e in range(configs.UPDATE_NUM):
             # BS Actor takes an action
             print("------- " + str(e) + " ---------")
-            bs_raw_a_ls = bs_agent.act(old_state, e)
+            bs_raw_a_ls, bs_raw_a_ls_no_noise = bs_agent.act(old_state, e)
             bs_a_ls = bs_agent.get_real_action(bs_raw_a_ls)
             # Jammer takes an action
             jmr_a_ls = jmr_agent.act(old_state, e)
 
             # Retrieve new state, reward, and whether the state is terminal
-            r, new_state = self.env.step([bs_a_ls, jmr_a_ls])
+            jammed_flag, r, new_state = self.env.step([bs_a_ls, jmr_a_ls])
+            jammed_flag_list[e] = jammed_flag
+            reward_list[e] = r
+            state_records[e] = new_state
+            power_allocation_records[e] = bs_a_ls[0]
+            user_channel_choosing_records[e] = bs_a_ls[1]
+
+            # Show actions
+            records[e] = r
+            info_color = "0;32m"
+            print("\033["+info_color+"[Info] Jammer action: \033[0m", jmr_a_ls)
+            print("\033["+info_color+"[Info] BS Raw actions: \033[0m", [round(k, 4) for k in bs_raw_a_ls])
+            print("\033["+info_color+"[Info] BS Actions: \033[0m" + str(bs_a_ls))
+            print("\033["+info_color+"[Info] Reward: \033[0m" + str(r))
             # Add outputs to memory buffer
             if e > 0:
-                bs_agent.memorize(old_state, bs_raw_a_ls, r, new_state)
-            # update the agent
-            bs_agent.update_brain()
+                if bs_agent.brain.buffer.count < bs_agent.brain.buffer.buffer_size or e % 1 == 0:
+                    bs_agent.memorize(old_state, bs_raw_a_ls, r, new_state)
+                bs_agent.brain.last_10_buffer.memorize(old_state, bs_raw_a_ls, r, new_state)
+
+            if e % 5 == 0 and e > configs.BEGIN_TRAINING_EPISONDE:
+                bs_agent.update_brain_channel_selection(e, jammed_flag_list)
+            """ Update using virtual data """
+
+            # if 400 < e < 403:
+            #     t_qs = bs_agent.brain.critic.target_q(self.pre_train_states, self.pre_train_bs_raw_actions)
+            #     print("Pre-trained target Q -------------------------------")
+            #     for i in range(len(self.pre_train_bs_raw_actions)):
+            #         delta = t_qs[i][0] - self.pre_train_rewards[i]
+            #         if delta >= 1.0:
+            #             print([round(k, 2) for k in self.pre_train_states[i]],
+            #                   [round(k, 2) for k in self.pre_train_bs_raw_actions[i]],
+            #                   round(self.pre_train_rewards[i], 2),
+            #                   round(t_qs[i][0], 2))
+
+            if e > 340 and e % 5 == 0:
+                # bs_virtual_raw_actions = bs_agent.get_virtual_actions(bs_raw_a_ls)
+                # v_rewards = np.zeros(len(bs_virtual_raw_actions))
+                # v_old_states = np.zeros((len(bs_virtual_raw_actions), bs_agent.state_dim))
+                # v_next_states = np.zeros((len(bs_virtual_raw_actions), bs_agent.state_dim))
+
+                # for k in range(len(bs_virtual_raw_actions)):
+                #     v_old_states[k] = old_state
+                #     v_bs_action = bs_agent.get_real_action(bs_virtual_raw_actions[k])
+                #     v_jammed_flag, v_rewards[k], v_next_states[k] = self.env.bs_virtual_step([v_bs_action, jmr_a_ls])
+                # bs_agent.update_brain_power_allocation_with_smallnet(e, power_allocation_records,
+                #                                                      user_channel_choosing_records,
+                #                                                      self.pre_train_states)
+                bs_agent.virtual_update_brain(e, power_allocation_records, user_channel_choosing_records)
+
 
             # Update current state
             old_state = new_state
 
-            # Test BS agent critic network
-            if e >= 500:
-                bs_agent.critic_test(old_state)
+        print("BS station buffer")
+        bs_agent.brain.buffer.print_buffer()
+        # ---------- Save models ----------
+        # bs_agent.save_brain("results/save_net.ckpt")
+        # --------- Write output file ---------
+        output_prefix = 'temp_results/' + scenario_name + '/' + model_name + '/' + str(experiment_num) + '_'
+        print('write output files to: ', output_prefix)
+        # Write reward and success rate to a csv file
+        # csv_file = open('CHACNet Reward list.csv', 'w', newline='')
+        # writer = csv.writer(csv_file)
+        # writer.writerow(reward_list)
+        # csv_file.close()
+        self.write_output_file(output_prefix + 'Reward_list.csv', reward_list)
+        # csv_file = open('CHACNet jammed flag list.csv', 'w', newline='')
+        # writer = csv.writer(csv_file)
+        # writer.writerow(jammed_flag_list)
+        # csv_file.close()
+        self.write_output_file(output_prefix + 'jammed_flag_list.csv', jammed_flag_list)
+        # csv_file = open('CHACNet state records.csv', 'w', newline='')
+        # writer = csv.writer(csv_file)
+        #         # for i in range(bs_agent.state_dim):
+        #         #     state_record = [state_records[j][i] for j in range(configs.UPDATE_NUM)]
+        #         #     writer.writerow(state_record)
+        # csv_file.close()
+        self.write_output_file(output_prefix + 'state_records.csv', state_records)
+        # csv_file = open('CHACNet power allocation records.csv', 'w', newline='')
+        # writer = csv.writer(csv_file)
+        # for i in range(configs.CHANNEL_NUM):
+        #     power_allocation_record = [power_allocation_records[j][i] for j in range(configs.UPDATE_NUM)]
+        #     writer.writerow(power_allocation_record)
+        # csv_file.close()
+        self.write_output_file(output_prefix + 'power_allocation_records.csv', power_allocation_records)
+        # csv_file = open('CHACNet channel choosing records.csv', 'w', newline='')
+        # writer = csv.writer(csv_file)
+        # for i in range(configs.USER_NUM):
+        #     state_record = [state_records[j][i] for j in range(configs.UPDATE_NUM)]
+        #     writer.writerow(state_record)
+        # csv_file.close()
+        self.write_output_file(output_prefix + 'channel_choosing_records.csv', user_channel_choosing_records)
 
-            # Show results
-            records[e] = r
-            print("Raw actions: ", bs_raw_a_ls)
-            print("Actions: " + str(bs_a_ls))
-            print("Reward: " + str(r))
-            # tqdm_e.set_description("Actions:" + str(bs_a_ls) + "Reward: " + str(r))
-            # tqdm_e.refresh()
 
-        plt.plot(records)
+def write_log(scenario_name, model_name):
+    log_file_name = 'temp_results/' + scenario_name + '/' + model_name + '/log.txt'
+    log_file = open(log_file_name, 'w', newline='')
+    log_file.write('This is a log file')
+    log_file.close()
 
 
 # -------------------- MAIN ----------------------------
-
-# state_count = configs.STATE_CNT  # env.env.observation_space.shape[0]
-# action_count = configs.ACTION_CNT  # env.env.action_space.n
-
-# bs_agent = LFAQBSAgentPowerAllocation(state_count, action_count,
-#                                       configs.BS_LFAQ_TEMPERATURE, configs.BS_LFAQ_MIN_TEMPERATURE,
-#                                       configs.BS_LFAQ_ALPHA, configs.BS_LFAQ_BETA, configs.BS_LFAQ_GAMMA,
-#                                       configs.BS_LFAQ_KAPPA, configs.BS_LFAQ_UPDATE_LOOPS)
-# jammer_agent = LFAQJammerAgent(state_count, action_count,
-#                                configs.JMR_LFAQ_TEMPERATURE, configs.JMR_LFAQ_MIN_TEMPERATURE,
-#                                configs.JMR_LFAQ_ALPHA, configs.JMR_LFAQ_BETA, configs.JMR_LFAQ_GAMMA,
-#                                configs.JMR_LFAQ_KAPPA, configs.JMR_LFAQ_UPDATE_LOOPS, configs.JMR_POWER_FACTOR)
-base_station_agent = BSAgent(1.0)
+bs_state_dim = configs.CHANNEL_NUM + 4 * configs.USER_NUM
+bs_act_dim = configs.CHANNEL_NUM + configs.USER_NUM
+env = Environment(bs_state_dim=bs_state_dim, bs_act_dim=bs_act_dim)
+base_station_agent = BSAgent(act_range=1.0, state_dim=bs_state_dim, act_dim=bs_act_dim)
 jammer_agent = JMRAgent()
-env = Environment()
-try:
-    env.run(base_station_agent, jammer_agent)
-finally:
-    pass
+
+scenario_name = 'downlink_basic'
+model_name = 'DDPG_PNN_SEQ'
+experiment_num = 10
+
+write_log(scenario_name, model_name)
+for i in range(experiment_num):
+    try:
+        env.run(base_station_agent, jammer_agent, scenario_name, model_name, i)
+    finally:
+        pass

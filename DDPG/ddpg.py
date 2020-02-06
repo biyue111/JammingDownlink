@@ -1,11 +1,14 @@
 import sys
 import numpy as np
+import tensorflow.compat.v1 as tf
+
 import configs as configs
 from .actor import Actor
 from .critic import Critic
 # from utils.stats import gather_stats
 # from utils.networks import tfSummary, OrnsteinUhlenbeckProcess
 from utils.agent_buffer import AgentBuffer
+from utils.utilFunc import *
 
 
 # TODO: memory buffer
@@ -15,24 +18,106 @@ class DDPG:
     Mainly refer to the code of @germain-hug
     """
 
-    def __init__(self, act_dim, env_dim, act_range, buffer_size=1500, gamma=0.0, lr=0.01, tau=0.9):
+    def __init__(self, act_dim, env_dim, act_range, buffer_size=600, gamma=0.0, lr=0.001, tau=0.3):
         """ Initialization
         """
         # Environment and A2C parameters
+        tf.disable_eager_execution()
         self.act_dim = act_dim
         self.act_range = act_range
         self.state_dim = env_dim
         self.gamma = gamma
         self.lr = lr
+        self.sess = tf.InteractiveSession()
         # Create actor and critic networks
-        self.actor = Actor(self.state_dim, self.act_dim, act_range, lr, tau)
-        self.critic = Critic(self.state_dim, self.act_dim, lr, tau)
+        self.actor = Actor(self.sess, self.state_dim, self.act_dim, act_range, lr, tau_in=1.0)
+        self.critic = Critic(self.sess, self.state_dim, self.act_dim, lr, tau_in=1.0)
         self.buffer = AgentBuffer(buffer_size)
+        self.last_10_buffer = AgentBuffer(10)
+        self.discrete_action_ls = configs.RAW_CHANNEL_LIST
+
+    def get_discrete_action(self, s, raw_a):
+        # Get discrete action with Wolpertinger Policy
+        action_element_list = np.array([])
+        for i in range(configs.CHANNEL_NUM, configs.CHANNEL_NUM + configs.USER_NUM):
+            tmp_element = raw_channel_to_2raw_channels(raw_a[i])
+            if i == configs.CHANNEL_NUM:
+                action_element_list = tmp_element
+            else:
+                action_element_list = np.vstack((action_element_list, tmp_element))
+        # print("action_element_list: ", action_element_list)
+        candidate_disc_a_ls = combination(action_element_list, 0)
+        # print("candidate_disc_a_ls: ", candidate_disc_a_ls)
+        candidate_a_ls = np.zeros((len(candidate_disc_a_ls), configs.CHANNEL_NUM + configs.USER_NUM))
+        continuous_a_ls = raw_a[0:configs.CHANNEL_NUM]
+        for i in range(len(candidate_a_ls)):
+            candidate_a_ls[i] = np.hstack((continuous_a_ls, candidate_disc_a_ls[i]))
+
+        v_ls = np.zeros(len(candidate_a_ls))
+        for i in range(len(candidate_a_ls)):
+            v_ls[i] = self.critic.q_value(np.expand_dims(s, axis=0),
+                                           np.expand_dims(candidate_a_ls[i], axis=0))
+        best_a_key = 0
+        greatest_v = v_ls[0]
+        for i in range(len(candidate_disc_a_ls)):
+            if v_ls[i] >= greatest_v:
+                best_a_key = i
+                greatest_v = v_ls[i]
+        result_a = candidate_a_ls[best_a_key]
+        # print("get_discrete_action")
+        # print(raw_a, candidate_disc_a_ls, v_ls, result_a)
+        return result_a
+
+    def get_discrete_actions(self, s_batch, raw_a_batch):
+        result_a_batch = np.zeros((len(raw_a_batch), len(raw_a_batch[0])))
+        for i in range(len(raw_a_batch)):
+            result_a_batch[i] = self.get_discrete_action(s_batch[i], raw_a_batch[i])
+        return result_a_batch
+
+    def get_target_discrete_action(self, s, raw_a):
+        # Get discrete action with Wolpertinger Policy
+        action_element_list = np.array([])
+        for i in range(configs.CHANNEL_NUM, configs.CHANNEL_NUM + configs.USER_NUM):
+            tmp_element = raw_channel_to_2raw_channels(raw_a[i])
+            if i == configs.CHANNEL_NUM:
+                action_element_list = tmp_element
+            else:
+                action_element_list = np.vstack((action_element_list, tmp_element))
+        # print("action_element_list: ", action_element_list)
+        candidate_disc_a_ls = combination(action_element_list, 0)
+        # print("candidate_disc_a_ls: ", candidate_disc_a_ls)
+        candidate_a_ls = np.zeros((len(candidate_disc_a_ls), configs.CHANNEL_NUM + configs.USER_NUM))
+        continuous_a_ls = raw_a[0:configs.CHANNEL_NUM]
+        for i in range(len(candidate_a_ls)):
+            candidate_a_ls[i] = np.hstack((continuous_a_ls, candidate_disc_a_ls[i]))
+
+        v_ls = np.zeros(len(candidate_a_ls))
+        for i in range(len(candidate_a_ls)):
+            v_ls[i] = self.critic.target_q(np.expand_dims(s, axis=0),
+                                           np.expand_dims(candidate_a_ls[i], axis=0))
+        best_a_key = 0
+        greatest_v = v_ls[0]
+        for i in range(len(candidate_disc_a_ls)):
+            if v_ls[i] >= greatest_v:
+                best_a_key = i
+                greatest_v = v_ls[i]
+        result_a = candidate_a_ls[best_a_key]
+        # print("get_discrete_action")
+        # print(raw_a, candidate_disc_a_ls, v_ls, result_a)
+        return result_a
+
+    def get_target_discrete_actions(self, s_batch, raw_a_batch):
+        result_a_batch = np.zeros((len(raw_a_batch), len(raw_a_batch[0])))
+        for i in range(len(raw_a_batch)):
+            result_a_batch[i] = self.get_target_discrete_action(s_batch[i], raw_a_batch[i])
+        return result_a_batch
 
     def policy_action(self, s):
-        """ Use the actor to predict value
+        """ Use the actor to do an action with the state
         """
-        return self.actor.predict(s)[0]
+        a = self.actor.target_action(s)
+        a = self.get_target_discrete_action(s, a)
+        return a
 
     def bellman(self, rewards, q_values):
         """ Use the Bellman Equation to compute the critic target
@@ -57,82 +142,252 @@ class DDPG:
         """ Update actor and critic networks from sampled experience
         """
         # Train critic
-        self.critic.train_on_batch(states, actions, critic_target)
+        for e in range(3000):
+            self.critic.train(critic_target, states, actions)
+
         # Q-Value Gradients under Current Policy
-        actions = self.actor.model.predict(states)
-        grads = self.critic.gradients(states, actions)
+        actions_grad = self.actor.actions(states)
+        q_grads = self.critic.gradients(states, actions_grad)
+        # print("Gradient: ", grads)
+
         # Train actor
-        self.actor.train(states, actions, np.array(grads).reshape((-1, self.act_dim)))
+        for e in range(6000):
+            actions_grad = self.actor.actions(states)
+            q_grads = self.critic.gradients(states, actions_grad)
+            self.actor.train(q_grads, states)
+
         # Transfer weights to target networks at rate Tau
-        self.actor.transfer_weights()
-        self.critic.transfer_weights()
+        self.actor.update_target()
+        self.critic.update_target()
 
     def train(self):
-
         # Sample experience from buffer
         states, actions, rewards, new_states = self.sample_batch(configs.BATCH_SIZE)
         # Predict target q-values using target networks
-        q_values = self.critic.target_predict([new_states, self.actor.target_predict(new_states)])
+        q_values = self.critic.target_q(new_states, self.actor.target_actions(new_states))
         # Compute critic target
         critic_target = self.bellman(rewards, q_values)
         # Train both networks on sampled batch, update target networks
         self.update_models(states, actions, critic_target)
 
-        # results = []
-        #
-        # # First, gather experience
-        # #tqdm_e = tqdm(range(args.nb_episodes), desc='Score', leave=True, unit=" episodes")
-        # for e in tqdm_e:
-        #
-        #     # Reset episode
-        #     time, cumul_reward, done = 0, 0, False
-        #     old_state = env.reset()
-        #     actions, states, rewards = [], [], []
-        #     noise = OrnsteinUhlenbeckProcess(size=self.act_dim)
-        #
-        #     while not done:
-        #         if args.render: env.render()
-        #         # Actor picks an action (following the deterministic policy)
-        #         a = self.policy_action(old_state)
-        #         # Clip continuous values to be valid w.r.t. environment
-        #         a = np.clip(a+noise.generate(time), -self.act_range, self.act_range)
-        #         # Retrieve new state, reward, and whether the state is terminal
-        #         new_state, r, done, _ = env.step(a)
-        #         # Add outputs to memory buffer
-        #         self.memorize(old_state, a, r, done, new_state)
-        #         # Sample experience from buffer
-        #         states, actions, rewards, dones, new_states, _ = self.sample_batch(args.batch_size)
-        #         # Predict target q-values using target networks
-        #         q_values = self.critic.target_predict([new_states, self.actor.target_predict(new_states)])
-        #         # Compute critic target
-        #         critic_target = self.bellman(rewards, q_values, dones)
-        #         # Train both networks on sampled batch, update target networks
-        #         self.update_models(states, actions, critic_target)
-        #         # Update current state
-        #         old_state = new_state
-        #         cumul_reward += r
-        #         time += 1
-        #
-        #     # Gather stats every episode for plotting
-        #     if(args.gather_stats):
-        #         mean, stdev = gather_stats(self, env)
-        #         results.append([e, mean, stdev])
-        #
-        #     # Export results for Tensorboard
-        #     score = tfSummary('score', cumul_reward)
-        #     summary_writer.add_summary(score, global_step=e)
-        #     summary_writer.flush()
-        #     # Display score
-        #     tqdm_e.set_description("Score: " + str(cumul_reward))
-        #     tqdm_e.refresh()
-        #
-        # return results
+    def train_channel_selection_transfer(self, actor_needed_update_flag):
+        # Sample experience from buffer
+        states, actions, rewards, new_states = self.sample_batch(configs.BATCH_SIZE)
+        # Predict target q-values using target networks
+        q_values = self.critic.target_q(new_states, self.actor.target_actions(new_states))
+        # Compute critic target
+        critic_target = self.bellman(rewards, q_values)
+        # Train critic
+        losses = []
+        for e in range(1000):
+            loss = self.critic.train_state_com(critic_target, states, actions)
+            if loss < 0.02:
+                break
+            if e % 200 == 0:
+                # losses.append(loss)
+                print("The loss of critic: ", loss)
+        self.critic.update_target()
 
-    # def save_weights(self, path):
-    #     path += '_LR_{}'.format(self.lr)
-    #     self.actor.save(path)
-    #     self.critic.save(path)
-    #
+        print("critic target test:------------")
+        t_q_values = self.critic.target_q(states, actions)
+        for i in range(len(actions)):
+            delta = t_q_values[i] - rewards[i]
+            if delta >= 2.0:
+                print([round(k, 2) for k in states[i]],
+                      [round(k, 2) for k in actions[i]],
+                      round(critic_target[i][0], 2),
+                      round(t_q_values[i][0], 2))
+
+        # Train actor
+        if actor_needed_update_flag == 1:
+            self.actor.transfer_target_to_estimation()
+            for i in range(1):
+                self.actor.initial_channel_selection_net()
+                for e in range(500):
+                    actions_grad = self.actor.actions(states)
+                    # if e % 100 == 0:
+                        # print("Episod: ", e+1, " 1st action: ", [round(i, 4) for i in actions_grad[0]])
+                    q_grads = self.critic.gradients(states, actions_grad)
+                    self.actor.train_channel_selection(q_grads, states)
+
+                # Transfer weights to target networks at rate Tau
+                states10, actions10, rewards10, new_states10 = self.last_10_buffer.order_sample_all()
+                target_actions = self.get_target_discrete_actions(states10, self.actor.target_actions(states10))
+                q_values_tc10 = self.critic.target_q(states10, target_actions)
+                estimation_actions = self.get_discrete_actions(states10, self.actor.actions(states10))
+                q_values_c10 = self.critic.target_q(states10, estimation_actions)
+                # print(actions10)
+                # print(self.actor.target_actions(states10))
+                print("Episode:", i, "Q-value of target critic: ", [q for q in q_values_tc10[:, 0]])
+                print("Episode:", i, "Q-value of critic: ", [q for q in q_values_c10[:, 0]])
+                if sum(q_values_tc10) < sum(q_values_c10):
+                    self.actor.update_target()
+                    print("\033[1;33m[Info] Actor channel selection target updated. \033[0m")
+
+    def train_power_allocation_with_smallnet(self, s):
+        states10, actions10, rewards10, new_states10 = self.last_10_buffer.sample_batch(10)
+        # print(actions10)
+        # for i in range(len(states10)):
+        #     for j in range(configs.CHANNEL_NUM):
+        #         states10[i][j] = 0.0
+        # states10 = [s[i] for i in range(len(actions10))]
+        a_channels = actions10[:, configs.CHANNEL_NUM:self.act_dim]
+        # print(a_channels)
+        self.actor.transfer_target_to_estimation()
+        for i in range(1):
+            self.actor.initial_pre_power_allocation_net()
+            for e in range(500):
+                pre_power_actions_grad = self.actor.pre_power_actions(a_channels)
+                pre_actions_grad = np.hstack((pre_power_actions_grad, a_channels))
+                q_grads = self.critic.gradients(states10, pre_actions_grad)
+                self.actor.pre_train_power_allocation(q_grads, a_channels)
+
+            pre_target_power_actions_grad = self.actor.pre_target_power_actions(a_channels)
+            tq_values = self.critic.target_q(states10, np.hstack((pre_target_power_actions_grad, a_channels)))
+            pre_power_actions_grad = self.actor.pre_power_actions(a_channels)
+            q_values = self.critic.target_q(states10, np.hstack((pre_power_actions_grad, a_channels)))
+            print("Small Actor.power_allocation Episode:", i)
+            print("Sum Q-values:", sum(q_values), "Sum Target Q-values:", sum(tq_values))
+            if sum(q_values) >= (sum(tq_values)) or i :
+                self.actor.update_target_pre_power_allocation()
+
+        pre_power_actions_grad = self.actor.pre_target_power_actions(a_channels)
+        pre_actions_grad = np.hstack((pre_power_actions_grad, a_channels))
+        tq_values = self.critic.target_q(states10, pre_actions_grad)
+        for i in range(len(a_channels)):
+            print([round(k, 2) for k in a_channels[i]],
+                  [round(k, 2) for k in pre_power_actions_grad[i]],
+                  round(tq_values[i][0], 2))
+
+        # Update small power allocation net to the actor (estimation) network
+        self.actor.transfer_power_network()
+        target_actions_test = self.actor.target_actions(states10)
+        tq_values = self.critic.target_q(states10, target_actions_test)
+        actions_test = self.actor.actions(states10)
+        q_values = self.critic.target_q(states10, actions_test)
+        print("Actor.power_allocation :")
+        print("Sum Q-values:", sum(q_values), "Sum Target Q-values:", sum(tq_values))
+        # if sum(q_values) >= (sum(tq_values)):
+        self.actor.update_target()
+        print("\033[1;33m[Info] Actor power allocation target updated. \033[0m")
+
+    def virtual_train(self):
+        print("Begin virtual train")
+        # q_values = self.critic.target_q(new_states, self.actor.target_actions(new_states))
+        # Compute critic target
+        # critic_target = self.bellman(rewards, q_values)
+
+        # for episode in range(5):
+        #     self.critic.train(critic_target, states, actions)
+        # Train actor
+        states10, actions10, rewards10, new_states10 = self.last_10_buffer.sample_batch(10)
+        self.actor.transfer_target_to_estimation()
+        for i in range(1):
+            self.actor.initial_power_allocation_net()
+            for e in range(200):
+                actions_grad = self.actor.actions(states10)
+                q_grads = self.critic.gradients(states10, actions_grad)
+                self.actor.train_power_allocation(q_grads, states10)
+            target_actions_test = self.actor.target_actions(states10)
+            tq_values = self.critic.target_q(states10, target_actions_test)
+            actions_test = self.actor.actions(states10)
+            q_values = self.critic.target_q(states10, actions_test)
+            print("Pre-train Actor.power_allocation Episode:", i)
+            print("Sum Q-values:", sum(q_values), "Sum Target Q-values:", sum(tq_values))
+            if sum(q_values) >= (sum(tq_values)):
+                self.actor.update_target()
+        # self.critic.update_target()
+        # self.actor.update_target()
+
+    def pre_train(self, states, actions, rewards, new_states, a_channels):
+        # Predict target q-values using target networks
+        load_phase1 = 1
+        load_phase2 = 0
+
+        if load_phase1 == 1:
+            print("Load Pre-train PHASE 1-----------------------------")
+            self.load_session("results/pre-train_results/selected_phase1/pre-train_phase1.ckpt")
+        else:
+            q_values = self.critic.target_q(new_states, self.actor.target_actions(new_states))
+            # Compute critic target
+            critic_target = self.bellman(rewards, q_values)
+            print("DDPG: Pre-train-------------------------------------")
+            print("Pre-train input data list:")
+            print("Data list length: ", len(actions))
+            for i in range(len(actions)):
+                print([round(k, 2) for k in states[i]],
+                      [round(k, 2) for k in actions[i]],
+                      round(critic_target[i][0], 2))
+
+            print("Pre-train PHASE 1----------------------------------")
+            print("DDPG: Begin pre-train critic network:")
+            for episode in range(8001):
+                loss = self.critic.train_action_com(critic_target, states, actions)
+                if episode % 1000 == 0:
+                    print("Pre-train critic:", episode, " loss: ", loss)
+            self.critic.pre_train_target()
+            t_qs = self.critic.target_q(states, actions)
+            print("Pre-trained target Q -------------------------------")
+            for i in range(len(actions)):
+                delta = t_qs[i][0] - critic_target[i][0]
+                if delta >= 1.0:
+                    print([round(k, 2) for k in states[i]],
+                          [round(k, 2) for k in actions[i]],
+                          round(critic_target[i][0], 2),
+                          round(t_qs[i][0], 2))
+            print("===================================================")
+            # Pre-train actor
+            print("Pre-train Actor------------------------------------")
+            for e in range(500):
+                actions_grad = self.actor.actions(states)
+                if e % 100 == 0:
+                    # losses.append(loss)
+                    print("Episod: ", e+1, " 1st action: ", [round(i, 4) for i in actions_grad[0]])
+                q_grads = self.critic.gradients(states, actions_grad)
+                self.actor.train_channel_selection(q_grads, states)
+            self.save_session("results/pre-train_results/phase1/pre-train_phase1.ckpt")
+
+        print("Pre-train PHASE 2----------------------------------")
+        print("Pre-train Actor.power_allocation-------------------")
+
+        pre_states = np.array(states[0:len(a_channels)])
+        # for i in range(100):
+        #     self.actor.initial_pre_power_allocation_net()
+        #     for e in range(200):
+        #         pre_power_actions_grad = self.actor.pre_power_actions(a_channels)
+        #         pre_actions_grad = np.hstack((pre_power_actions_grad, a_channels))
+        #         q_grads = self.critic.gradients(pre_states, pre_actions_grad)
+        #         self.actor.pre_train_power_allocation(q_grads, a_channels)
+        #
+        #     pre_target_power_actions_grad = self.actor.pre_target_power_actions(a_channels)
+        #     tq_values = self.critic.target_q(pre_states, np.hstack((pre_target_power_actions_grad, a_channels)))
+        #     pre_power_actions_grad = self.actor.pre_power_actions(a_channels)
+        #     q_values = self.critic.target_q(pre_states, np.hstack((pre_power_actions_grad, a_channels)))
+        #     print("Pre-train Actor.power_allocation Episode:", i)
+        #     print("Sum Q-values:", sum(q_values), "Sum Target Q-values:", sum(tq_values))
+        #     if sum(q_values) >= (sum(tq_values)):
+        #         self.actor.update_target_pre_power_allocation()
+        #
+        ## Actor.power_allocation Test
+        # pre_power_actions_grad = self.actor.pre_target_power_actions(a_channels)
+        # pre_actions_grad = np.hstack((pre_power_actions_grad, a_channels))
+        # tq_values = self.critic.target_q(pre_states, pre_actions_grad)
+        # for i in range(len(a_channels)):
+        #     print([round(k, 2) for k in a_channels[i]],
+        #           [round(k, 2) for k in pre_power_actions_grad[i]],
+        #           round(tq_values[i][0], 2))
+        # self.actor.transfer_power_network()
+        # self.actor.pre_train_target()
+
+    def save_session(self, path):
+        saver = tf.train.Saver()
+        save_path = saver.save(self.sess, path)
+        print("Save session to: ", save_path)
+
+    def load_session(self, path):
+        saver = tf.train.Saver()
+        saver.restore(self.sess, path)
+
     # def load_weights(self, path_actor, path_critic):
     #     self.critic.load_weights(path_critic)
     #     self.actor.load_weights(path_actor)

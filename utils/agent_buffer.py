@@ -41,6 +41,15 @@ class AgentBuffer(object):
         """
         return self.count
 
+    def order_sample_all(self):
+        s_batch = np.array([i[0] for i in self.buffer])
+        a_batch = np.array([i[1] for i in self.buffer])
+        r_batch = np.array([i[2] for i in self.buffer])
+        # d_batch = np.array([i[3] for i in batch])
+        new_s_batch = np.array([i[3] for i in self.buffer])
+
+        return s_batch, a_batch, r_batch, new_s_batch
+
     def sample_batch(self, batch_size):
         """ Sample a batch, optionally with (PER)
         """
@@ -72,3 +81,7 @@ class AgentBuffer(object):
         """
         self.buffer = deque()
         self.count = 0
+
+    def print_buffer(self):
+        for i in range(self.count):
+            print(self.buffer[i][1], self.buffer[i][2])
