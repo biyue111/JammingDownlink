@@ -93,10 +93,11 @@ class BSAgent:
         return needed_flag
 
     def update_brain_channel_selection(self, episode, jammed_flag_list):
-        actor_needed_update_flag = self.is_needed_update_channel_selection_actor(episode, jammed_flag_list)
+        # actor_needed_update_flag = self.is_needed_update_channel_selection_actor(episode, jammed_flag_list)
         # if self.brain.buffer.count > configs.BATCH_SIZE:
-        if actor_needed_update_flag == 1:
-            print("\033[0;33m[Info] Need channel selection actor update. \033[0m")
+        # if actor_needed_update_flag == 1:
+        #     print("\033[0;33m[Info] Need channel selection actor update. \033[0m")
+        actor_needed_update_flag = 1
         self.brain.train_channel_selection_transfer(actor_needed_update_flag)
 
     def is_needed_update_power_allocation_actor(self, episode, power_list, channel_list):
@@ -116,10 +117,10 @@ class BSAgent:
         return needed_flag
 
     def virtual_update_brain(self, episode, power_list, channel_list):
-        actor_needed_update_flag = self.is_needed_update_power_allocation_actor(episode, power_list, channel_list)
-        if actor_needed_update_flag == 1:
-            print("\033[0;33m[Info] Need power allocation update. \033[0m")
-            self.brain.virtual_train()
+        # actor_needed_update_flag = self.is_needed_update_power_allocation_actor(episode, power_list, channel_list)
+        # if actor_needed_update_flag == 1:
+            # print("\033[0;33m[Info] Need power allocation update. \033[0m")
+        self.brain.virtual_train()
 
     def update_brain_power_allocation_with_smallnet(self, episode, power_list, channel_list, s):
         actor_needed_update_flag = self.is_needed_update_power_allocation_actor(episode, power_list, channel_list)

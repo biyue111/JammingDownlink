@@ -220,9 +220,9 @@ class DDPG:
                 # print(self.actor.target_actions(states10))
                 print("Episode:", i, "Q-value of target critic: ", [q for q in q_values_tc10[:, 0]])
                 print("Episode:", i, "Q-value of critic: ", [q for q in q_values_c10[:, 0]])
-                if sum(q_values_tc10) < sum(q_values_c10):
-                    self.actor.update_target()
-                    print("\033[1;33m[Info] Actor channel selection target updated. \033[0m")
+                # if sum(q_values_tc10) < sum(q_values_c10):
+                self.actor.update_target()
+                    # print("\033[1;33m[Info] Actor channel selection target updated. \033[0m")
 
     def train_power_allocation_with_smallnet(self, s):
         states10, actions10, rewards10, new_states10 = self.last_10_buffer.sample_batch(10)
