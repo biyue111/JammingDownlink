@@ -37,9 +37,10 @@ class DownlinkEnv:
         # Write jammer jammed channel
         i = 0
         for j in range(self.channel_num):
-            s[i] = jammer_power_allocation[j] / configs.JAMMER_POWER
+            # s[i] = jammer_power_allocation[j] / configs.JAMMER_POWER
+            s[i] = 0.0 / configs.JAMMER_POWER  # Assume the base station has no info about jammer's power
             i += 1
-        # Write user's position (x, y), channel chosen and data rate to the state
+        # Write user's positio (x, y), channel chosen and data rate to the staten
         for j in range(self.user_num):
             s[i] = self.user_positions[j][0] / self.position_range
             i += 1
