@@ -138,37 +138,37 @@ class DDPG:
     def sample_batch(self, batch_size):
         return self.buffer.sample_batch(batch_size)
 
-    def update_models(self, states, actions, critic_target):
-        """ Update actor and critic networks from sampled experience
-        """
-        # Train critic
-        for e in range(3000):
-            self.critic.train(critic_target, states, actions)
+    # def update_models(self, states, actions, critic_target):
+    #     """ Update actor and critic networks from sampled experience
+    #     """
+    #     # Train critic
+    #     for e in range(3000):
+    #         self.critic.train(critic_target, states, actions)
+    #
+    #     # Q-Value Gradients under Current Policy
+    #     actions_grad = self.actor.actions(states)
+    #     q_grads = self.critic.gradients(states, actions_grad)
+    #     # print("Gradient: ", grads)
+    #
+    #     # Train actor
+    #     for e in range(6000):
+    #         actions_grad = self.actor.actions(states)
+    #         q_grads = self.critic.gradients(states, actions_grad)
+    #         self.actor.train(q_grads, states)
+    #
+    #     # Transfer weights to target networks at rate Tau
+    #     self.actor.update_target()
+    #     self.critic.update_target()
 
-        # Q-Value Gradients under Current Policy
-        actions_grad = self.actor.actions(states)
-        q_grads = self.critic.gradients(states, actions_grad)
-        # print("Gradient: ", grads)
-
-        # Train actor
-        for e in range(6000):
-            actions_grad = self.actor.actions(states)
-            q_grads = self.critic.gradients(states, actions_grad)
-            self.actor.train(q_grads, states)
-
-        # Transfer weights to target networks at rate Tau
-        self.actor.update_target()
-        self.critic.update_target()
-
-    def train(self):
-        # Sample experience from buffer
-        states, actions, rewards, new_states = self.sample_batch(configs.BATCH_SIZE)
-        # Predict target q-values using target networks
-        q_values = self.critic.target_q(new_states, self.actor.target_actions(new_states))
-        # Compute critic target
-        critic_target = self.bellman(rewards, q_values)
-        # Train both networks on sampled batch, update target networks
-        self.update_models(states, actions, critic_target)
+    # def train(self):
+    #     # Sample experience from buffer
+    #     states, actions, rewards, new_states = self.sample_batch(configs.BATCH_SIZE)
+    #     # Predict target q-values using target networks
+    #     q_values = self.critic.target_q(new_states, self.actor.target_actions(new_states))
+    #     # Compute critic target
+    #     critic_target = self.bellman(rewards, q_values)
+    #     # Train both networks on sampled batch, update target networks
+    #     self.update_models(states, actions, critic_target)
 
     def train_channel_selection_transfer(self, actor_needed_update_flag):
         # Sample experience from buffer
@@ -224,80 +224,89 @@ class DDPG:
                 self.actor.update_target()
                     # print("\033[1;33m[Info] Actor channel selection target updated. \033[0m")
 
-    def train_power_allocation_with_smallnet(self, s):
-        states10, actions10, rewards10, new_states10 = self.last_10_buffer.sample_batch(10)
-        # print(actions10)
-        # for i in range(len(states10)):
-        #     for j in range(configs.CHANNEL_NUM):
-        #         states10[i][j] = 0.0
-        # states10 = [s[i] for i in range(len(actions10))]
-        a_channels = actions10[:, configs.CHANNEL_NUM:self.act_dim]
-        # print(a_channels)
-        self.actor.transfer_target_to_estimation()
-        for i in range(1):
-            self.actor.initial_pre_power_allocation_net()
-            for e in range(500):
-                pre_power_actions_grad = self.actor.pre_power_actions(a_channels)
-                pre_actions_grad = np.hstack((pre_power_actions_grad, a_channels))
-                q_grads = self.critic.gradients(states10, pre_actions_grad)
-                self.actor.pre_train_power_allocation(q_grads, a_channels)
+    # def train_power_allocation_with_smallnet(self, s):
+    #     states10, actions10, rewards10, new_states10 = self.last_10_buffer.sample_batch(10)
+    #     # print(actions10)
+    #     # for i in range(len(states10)):
+    #     #     for j in range(configs.CHANNEL_NUM):
+    #     #         states10[i][j] = 0.0
+    #     # states10 = [s[i] for i in range(len(actions10))]
+    #     a_channels = actions10[:, configs.CHANNEL_NUM:self.act_dim]
+    #     # print(a_channels)
+    #     self.actor.transfer_target_to_estimation()
+    #     for i in range(1):
+    #         self.actor.initial_pre_power_allocation_net()
+    #         for e in range(500):
+    #             pre_power_actions_grad = self.actor.pre_power_actions(a_channels)
+    #             pre_actions_grad = np.hstack((pre_power_actions_grad, a_channels))
+    #             q_grads = self.critic.gradients(states10, pre_actions_grad)
+    #             self.actor.pre_train_power_allocation(q_grads, a_channels)
+    #
+    #         pre_target_power_actions_grad = self.actor.pre_target_power_actions(a_channels)
+    #         tq_values = self.critic.target_q(states10, np.hstack((pre_target_power_actions_grad, a_channels)))
+    #         pre_power_actions_grad = self.actor.pre_power_actions(a_channels)
+    #         q_values = self.critic.target_q(states10, np.hstack((pre_power_actions_grad, a_channels)))
+    #         print("Small Actor.power_allocation Episode:", i)
+    #         print("Sum Q-values:", sum(q_values), "Sum Target Q-values:", sum(tq_values))
+    #         if sum(q_values) >= (sum(tq_values)) or i :
+    #             self.actor.update_target_pre_power_allocation()
+    #
+    #     pre_power_actions_grad = self.actor.pre_target_power_actions(a_channels)
+    #     pre_actions_grad = np.hstack((pre_power_actions_grad, a_channels))
+    #     tq_values = self.critic.target_q(states10, pre_actions_grad)
+    #     for i in range(len(a_channels)):
+    #         print([round(k, 2) for k in a_channels[i]],
+    #               [round(k, 2) for k in pre_power_actions_grad[i]],
+    #               round(tq_values[i][0], 2))
+    #
+    #     # Update small power allocation net to the actor (estimation) network
+    #     self.actor.transfer_power_network()
+    #     target_actions_test = self.actor.target_actions(states10)
+    #     tq_values = self.critic.target_q(states10, target_actions_test)
+    #     actions_test = self.actor.actions(states10)
+    #     q_values = self.critic.target_q(states10, actions_test)
+    #     print("Actor.power_allocation :")
+    #     print("Sum Q-values:", sum(q_values), "Sum Target Q-values:", sum(tq_values))
+    #     # if sum(q_values) >= (sum(tq_values)):
+    #     self.actor.update_target()
+    #     print("\033[1;33m[Info] Actor power allocation target updated. \033[0m")
 
-            pre_target_power_actions_grad = self.actor.pre_target_power_actions(a_channels)
-            tq_values = self.critic.target_q(states10, np.hstack((pre_target_power_actions_grad, a_channels)))
-            pre_power_actions_grad = self.actor.pre_power_actions(a_channels)
-            q_values = self.critic.target_q(states10, np.hstack((pre_power_actions_grad, a_channels)))
-            print("Small Actor.power_allocation Episode:", i)
-            print("Sum Q-values:", sum(q_values), "Sum Target Q-values:", sum(tq_values))
-            if sum(q_values) >= (sum(tq_values)) or i :
-                self.actor.update_target_pre_power_allocation()
-
-        pre_power_actions_grad = self.actor.pre_target_power_actions(a_channels)
-        pre_actions_grad = np.hstack((pre_power_actions_grad, a_channels))
-        tq_values = self.critic.target_q(states10, pre_actions_grad)
-        for i in range(len(a_channels)):
-            print([round(k, 2) for k in a_channels[i]],
-                  [round(k, 2) for k in pre_power_actions_grad[i]],
-                  round(tq_values[i][0], 2))
-
-        # Update small power allocation net to the actor (estimation) network
-        self.actor.transfer_power_network()
-        target_actions_test = self.actor.target_actions(states10)
-        tq_values = self.critic.target_q(states10, target_actions_test)
-        actions_test = self.actor.actions(states10)
-        q_values = self.critic.target_q(states10, actions_test)
-        print("Actor.power_allocation :")
-        print("Sum Q-values:", sum(q_values), "Sum Target Q-values:", sum(tq_values))
-        # if sum(q_values) >= (sum(tq_values)):
-        self.actor.update_target()
-        print("\033[1;33m[Info] Actor power allocation target updated. \033[0m")
-
-    def virtual_train(self):
-        print("Begin virtual train")
+    def train_power_allocation(self, actor_needed_update_flag):
+        print("Begin train_power_allocation")
+        # Sample experience from buffer
+        states, actions, rewards, new_states = self.sample_batch(configs.BATCH_SIZE)
         # q_values = self.critic.target_q(new_states, self.actor.target_actions(new_states))
         # Compute critic target
         # critic_target = self.bellman(rewards, q_values)
 
-        # for episode in range(5):
-        #     self.critic.train(critic_target, states, actions)
         # Train actor
-        states10, actions10, rewards10, new_states10 = self.last_10_buffer.sample_batch(10)
-        self.actor.transfer_target_to_estimation()
-        for i in range(1):
-            self.actor.initial_power_allocation_net()
-            for e in range(200):
-                actions_grad = self.actor.actions(states10)
-                q_grads = self.critic.gradients(states10, actions_grad)
-                self.actor.train_power_allocation(q_grads, states10)
+        if actor_needed_update_flag == 1:
+            self.actor.transfer_target_to_estimation()
+            for i in range(1):
+                self.actor.initial_power_allocation_net()
+                for e in range(500):
+                    actions_grad = self.actor.actions(states)
+                    # if e % 100 == 0:
+                        # print("Episod: ", e+1, " 1st action: ", [round(i, 4) for i in actions_grad[0]])
+                    q_grads = self.critic.gradients(states, actions_grad)
+                    self.actor.train_power_allocation(q_grads, states)
+
+            # Train actor
+            states10, actions10, rewards10, new_states10 = self.last_10_buffer.order_sample_all()
+            # for i in range(1):
+            #     self.actor.initial_power_allocation_net()
+            #     for e in range(200):
+            #         actions_grad = self.actor.actions(states10)
+            #         q_grads = self.critic.gradients(states10, actions_grad)
+            #         self.actor.train_power_allocation(q_grads, states10)
             target_actions_test = self.actor.target_actions(states10)
             tq_values = self.critic.target_q(states10, target_actions_test)
             actions_test = self.actor.actions(states10)
             q_values = self.critic.target_q(states10, actions_test)
-            print("Pre-train Actor.power_allocation Episode:", i)
+            # print("Pre-train Actor.power_allocation Episode:", i)
             print("Sum Q-values:", sum(q_values), "Sum Target Q-values:", sum(tq_values))
             if sum(q_values) >= (sum(tq_values)):
                 self.actor.update_target()
-        # self.critic.update_target()
-        # self.actor.update_target()
 
     def pre_train(self, states, actions, rewards, new_states, a_channels):
         # Predict target q-values using target networks

@@ -1,17 +1,19 @@
 import math as math
-from DDPG.ddpg import *
+from .DDPG.ddpg import *
+from Agents.abstract_agent import AbstractAgent
 import configs as configs
 from utils.utilFunc import *
 import csv
 
 
 # -------------------- BS agent ------------------------
-class BSAgent:
+class DdpgPnnAgent(AbstractAgent):
     def __init__(self, act_range, act_dim, state_dim):
         # Create a ddpg network with
         # actions: [power allocation in each channel, channel chosen for each user]
         # states: [user position (x, y), channel chosen, data_rate] * number of user
         # action range: [0, 1]
+        self.model_name = 'DDPG_PNN_SEQ'
         self.max_power = configs.BS_MAX_POWER
         self.act_range = act_range
         self.act_dim = act_dim
@@ -22,7 +24,9 @@ class BSAgent:
         self.noise = OrnsteinUhlenbeckProcess(size=self.act_dim, n_steps_annealing=250)
         self.virtual_action_step = configs.VIRTUAL_ACTION_STEP
 
-    def act(self, s, t):
+    def act(self, s, e):
+        # Input: state, episode number
+        # Output: action
         fix_power_flag = 0
         fix_channel_flag = 0
         # print("The state:" + str(s))
@@ -38,7 +42,7 @@ class BSAgent:
         v = self.brain.critic.target_q(np.expand_dims(s, axis=0), np.expand_dims(a_no_noise_raw, axis=0))
         print("Value of the chosen action:", v)
         # ------- Add Noise -------
-        noise = self.noise.generate(t)
+        noise = self.noise.generate(e)
         print("Noise: ", noise)
         a = np.clip(a_no_noise_raw + noise, -self.act_range, self.act_range)
         a = self.brain.get_target_discrete_action(s, a)
@@ -58,6 +62,16 @@ class BSAgent:
                 a[i + configs.CHANNEL_NUM] = 0
         print("####")
         return a, a_no_noise_raw
+
+    def update_brain(self, e):
+        # if self.brain.buffer.count > configs.BATCH_SIZE:
+        #     self.brain.train()
+        if e % 5 == 0 and e > configs.BEGIN_TRAINING_EPISONDE:
+            actor_needed_update_flag = 1
+            self.brain.train_channel_selection_transfer(actor_needed_update_flag)
+
+        if e > 340 and e % 5 == 0:
+            self.brain.train_power_allocation(e)
 
     def get_real_action(self, raw_a):
         #  return "real" action: [power_allocation_ls, user_channel_ls]
@@ -81,10 +95,6 @@ class BSAgent:
                 user_channel_ls[i] = configs.CHANNEL_NUM - 1
         return [power_allocation_ls, user_channel_ls]
 
-    def update_brain(self):
-        if self.brain.buffer.count > configs.BATCH_SIZE:
-            self.brain.train()
-
     def is_needed_update_channel_selection_actor(self, episode, jammed_flag_list):
         needed_flag = 0
         for i in range(10):
@@ -92,13 +102,13 @@ class BSAgent:
                 needed_flag = 1
         return needed_flag
 
-    def update_brain_channel_selection(self, episode, jammed_flag_list):
+    # def update_brain_channel_selection(self, episode, jammed_flag_list):
         # actor_needed_update_flag = self.is_needed_update_channel_selection_actor(episode, jammed_flag_list)
         # if self.brain.buffer.count > configs.BATCH_SIZE:
         # if actor_needed_update_flag == 1:
         #     print("\033[0;33m[Info] Need channel selection actor update. \033[0m")
-        actor_needed_update_flag = 1
-        self.brain.train_channel_selection_transfer(actor_needed_update_flag)
+        # actor_needed_update_flag = 1
+        # self.brain.train_channel_selection_transfer(actor_needed_update_flag)
 
     def is_needed_update_power_allocation_actor(self, episode, power_list, channel_list):
         needed_flag = 0
@@ -116,39 +126,41 @@ class BSAgent:
                 needed_flag = 1
         return needed_flag
 
-    def virtual_update_brain(self, episode, power_list, channel_list):
+    # def virtual_update_brain(self, episode):
         # actor_needed_update_flag = self.is_needed_update_power_allocation_actor(episode, power_list, channel_list)
         # if actor_needed_update_flag == 1:
             # print("\033[0;33m[Info] Need power allocation update. \033[0m")
-        self.brain.virtual_train()
+        # self.brain.train_power_allocation()
 
-    def update_brain_power_allocation_with_smallnet(self, episode, power_list, channel_list, s):
-        actor_needed_update_flag = self.is_needed_update_power_allocation_actor(episode, power_list, channel_list)
-        if actor_needed_update_flag == 1:
-            print("\033[0;33m[Info] Need power allocation update. \033[0m")
-            self.brain.train_power_allocation_with_smallnet(s)
+    # def update_brain_power_allocation_with_smallnet(self, episode, power_list, channel_list, s):
+    #     actor_needed_update_flag = self.is_needed_update_power_allocation_actor(episode, power_list, channel_list)
+    #     if actor_needed_update_flag == 1:
+    #         print("\033[0;33m[Info] Need power allocation update. \033[0m")
+    #         self.brain.train_power_allocation_with_smallnet(s)
 
     def memorize(self, old_state, a, r, new_state):
-        self.brain.memorize(old_state, a, r, new_state)
+        if self.brain.buffer.count < self.brain.buffer.buffer_size:
+            self.brain.memorize(old_state, a, r, new_state)
+        self.brain.last_10_buffer.memorize(old_state, a, r, new_state)
 
     def pre_train(self, states, bs_actions, rewards, a_channels):
         # Generate pre-train data
         self.brain.pre_train(states, bs_actions, rewards, states, a_channels)
         self.actor_test(states[0])
 
-    def get_virtual_actions(self, real_raw_action):
-        # Generate virtual actions
-        channel_chosen = real_raw_action[configs.USER_NUM:(configs.USER_NUM + configs.CHANNEL_NUM)]
-        pa_step = 1.0 * self.virtual_action_step  # The "wide" of a channel
-        a_pa = np.arange(-1, 1 + pa_step, pa_step)
-
-        a_pa_ls = np.array(np.meshgrid(a_pa, a_pa, a_pa)).T.reshape(-1, 3)  # TODO generalize
-        virtual_actions = np.zeros((len(a_pa_ls), configs.USER_NUM + configs.CHANNEL_NUM))
-        for i in range(len(a_pa_ls)):
-            virtual_actions[i] = np.hstack((a_pa_ls[i], channel_chosen))
-        # print("Number of Virtual actions: ", len(virtual_actions))
-        # print("Virtual actions: ", virtual_actions)
-        return virtual_actions
+    # def get_virtual_actions(self, real_raw_action):
+    #     # Generate virtual actions
+    #     channel_chosen = real_raw_action[configs.USER_NUM:(configs.USER_NUM + configs.CHANNEL_NUM)]
+    #     pa_step = 1.0 * self.virtual_action_step  # The "wide" of a channel
+    #     a_pa = np.arange(-1, 1 + pa_step, pa_step)
+    #
+    #     a_pa_ls = np.array(np.meshgrid(a_pa, a_pa, a_pa)).T.reshape(-1, 3)  # TODO generalize
+    #     virtual_actions = np.zeros((len(a_pa_ls), configs.USER_NUM + configs.CHANNEL_NUM))
+    #     for i in range(len(a_pa_ls)):
+    #         virtual_actions[i] = np.hstack((a_pa_ls[i], channel_chosen))
+    #     # print("Number of Virtual actions: ", len(virtual_actions))
+    #     # print("Virtual actions: ", virtual_actions)
+    #     return virtual_actions
 
     def critic_test(self, s, file_name):
         #  Print critic network

@@ -1,12 +1,13 @@
 import math as math
-from DDPG.ddpg import *
+# from DDPG.ddpg import *
 from DownlinkEnv import *
 import configs as configs
 from tqdm import tqdm
 from utils.utilFunc import *
 import matplotlib.pyplot as plt
 import csv
-from agents import *
+from Agents.DDPG_PNN_SQN.agent import DdpgPnnAgent
+from Agents.DDPG_PNN_SQN.agent import JMRAgent  # TODO: seperate JMRAgent
 
 
 # -------------------- ENVIRONMENT ---------------------
@@ -100,13 +101,14 @@ class Environment:
             print("\033["+info_color+"[Info] Reward: \033[0m" + str(r))
             # Add outputs to memory buffer
             if e > 0:
-                if bs_agent.brain.buffer.count < bs_agent.brain.buffer.buffer_size or e % 1 == 0:
+                if bs_agent.brain.buffer.count < bs_agent.brain.buffer.buffer_size:
                     bs_agent.memorize(old_state, bs_raw_a_ls, r, new_state)
                 bs_agent.brain.last_10_buffer.memorize(old_state, bs_raw_a_ls, r, new_state)
 
-            if e % 5 == 0 and e > configs.BEGIN_TRAINING_EPISONDE:
-                bs_agent.update_brain_channel_selection(e, jammed_flag_list)
-            """ Update using virtual data """
+            bs_agent.update_brain(e)
+            # if e % 5 == 0 and e > configs.BEGIN_TRAINING_EPISONDE:
+            #     bs_agent.update_brain_channel_selection(e, jammed_flag_list)
+            # """ Update using virtual data """
 
             # if 400 < e < 403:
             #     t_qs = bs_agent.brain.critic.target_q(self.pre_train_states, self.pre_train_bs_raw_actions)
@@ -119,7 +121,7 @@ class Environment:
             #                   round(self.pre_train_rewards[i], 2),
             #                   round(t_qs[i][0], 2))
 
-            if e > 340 and e % 5 == 0:
+            # if e > 340 and e % 5 == 0:
                 # bs_virtual_raw_actions = bs_agent.get_virtual_actions(bs_raw_a_ls)
                 # v_rewards = np.zeros(len(bs_virtual_raw_actions))
                 # v_old_states = np.zeros((len(bs_virtual_raw_actions), bs_agent.state_dim))
@@ -132,7 +134,7 @@ class Environment:
                 # bs_agent.update_brain_power_allocation_with_smallnet(e, power_allocation_records,
                 #                                                      user_channel_choosing_records,
                 #                                                      self.pre_train_states)
-                bs_agent.virtual_update_brain(e, power_allocation_records, user_channel_choosing_records)
+                # bs_agent.virtual_update_brain(e, power_allocation_records, user_channel_choosing_records)
 
 
             # Update current state
@@ -190,11 +192,11 @@ def write_log(scenario_name, model_name):
 bs_state_dim = configs.CHANNEL_NUM + 4 * configs.USER_NUM
 bs_act_dim = configs.CHANNEL_NUM + configs.USER_NUM
 env = Environment(bs_state_dim=bs_state_dim, bs_act_dim=bs_act_dim)
-base_station_agent = BSAgent(act_range=1.0, state_dim=bs_state_dim, act_dim=bs_act_dim)
+base_station_agent = DdpgPnnAgent(act_range=1.0, state_dim=bs_state_dim, act_dim=bs_act_dim)
 jammer_agent = JMRAgent()
 
 scenario_name = 'downlink_basic'
-model_name = 'DDPG_PNN_SEQ'
+model_name = base_station_agent.model_name
 experiment_num = 10
 
 write_log(scenario_name, model_name)
