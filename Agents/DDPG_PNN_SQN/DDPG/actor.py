@@ -87,8 +87,8 @@ class Actor:
         b1 = self.variable([layer1_size], state_dim)
         W2 = self.variable([layer1_size, layer2_size], layer1_size)
         b2 = self.variable([layer2_size], layer1_size)
-        W3 = tf.Variable(tf.random_uniform([layer2_size, channel_num], -1.0, 1.0))
-        b3 = tf.Variable(tf.random_uniform([channel_num], -1.0, 1.0))
+        W3 = tf.Variable(tf.random_uniform([layer2_size, user_num], -1.0, 1.0))
+        b3 = tf.Variable(tf.random_uniform([user_num], -1.0, 1.0))
 
         layer1 = tf.nn.relu(tf.matmul(state_input, W1) + b1)
         layer2 = tf.nn.relu(tf.matmul(layer1, W2) + b2)
@@ -133,7 +133,7 @@ class Actor:
         channel_num = configs.CHANNEL_NUM
         user_num = configs.USER_NUM
 
-        pre_action_channel_input = tf.placeholder("float", [None, channel_num])
+        pre_action_channel_input = tf.placeholder("float", [None, user_num])
 
         W4 = self.variable([user_num, layer1_size], user_num)
         b4 = self.variable([layer1_size], user_num)
@@ -152,7 +152,7 @@ class Actor:
         channel_num = configs.CHANNEL_NUM
         user_num = configs.USER_NUM
 
-        pre_action_channel_input = tf.placeholder("float", [None, channel_num])
+        pre_action_channel_input = tf.placeholder("float", [None, user_num])
         self.pre_tau = tf.placeholder("float")
         ema = tf.train.ExponentialMovingAverage(decay=1 - self.pre_tau)
         pre_target_update = ema.apply(pre_net)

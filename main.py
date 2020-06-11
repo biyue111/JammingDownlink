@@ -42,10 +42,13 @@ class Environment:
         print("------------Begin pre-train------------")
         ch_step = 2.0 / (1.0 * configs.CHANNEL_NUM)  # The "wide" of a channel
         a_channels = configs.RAW_CHANNEL_LIST
+        # Generate all channel choosing options
         a_channel_list = np.array(np.meshgrid(a_channels, a_channels, a_channels)).T.reshape(-1, 3)
         power_step = 0.2
+        # Generate all power allocation options
         a_powers = np.arange(-1.0, 1 + power_step, power_step)
         a_power_list = np.array(np.meshgrid(a_powers, a_powers, a_powers)).T.reshape(-1, 3)
+
         jmr_a = np.zeros(configs.CHANNEL_NUM)
         for i in range(len(a_power_list)):
             for j in range(len(a_channel_list)):

@@ -75,6 +75,7 @@ class DdpgPnnAgent(AbstractAgent):
 
     def get_real_action(self, raw_a):
         #  return "real" action: [power_allocation_ls, user_channel_ls]
+        print(raw_a)
         raw_power_allocation = raw_a[0:configs.CHANNEL_NUM]
         raw_user_channel_ls = raw_a[configs.CHANNEL_NUM:configs.CHANNEL_NUM + configs.USER_NUM]
         # Normalization

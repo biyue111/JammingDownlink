@@ -9,8 +9,9 @@ RAW_CHANNEL_STEP = 2.0 / (CHANNEL_NUM * 1.0)
 RAW_CHANNEL_LIST = np.arange(-1.0 + 0.5 * RAW_CHANNEL_STEP, 1.0, RAW_CHANNEL_STEP)
 
 # BS  and users common configs
-USER_NUM = 3
-USER_POSITIONS = np.array([[1.0, 1.0], [-1.0, 1.0], [1.0, -1.0], [-1.0, -1.0]])
+USER_NUM = 8
+USER_POSITIONS = np.array([[1.0, 1.0], [-1.0, 1.0], [1.0, -1.0], [-1.0, -1.0],
+                           [0.9, 0.9], [-0.9, 0.9], [0.9, -0.9], [-0.9, -0.9]])
 POSITION_RANGE = 1.0
 BATCH_SIZE = 200
 BEGIN_TRAINING_EPISONDE = 50
