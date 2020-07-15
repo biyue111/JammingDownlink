@@ -7,6 +7,7 @@ from utils.utilFunc import *
 import matplotlib.pyplot as plt
 import csv
 from Agents.DDPG_PNN_SQN.agent import DdpgPnnAgent
+from Agents.Q_learning.q_agent import QAgent
 from Agents.DDPG_PNN_SQN.agent import JMRAgent  # TODO: seperate JMRAgent
 
 
@@ -78,11 +79,13 @@ class Environment:
         power_allocation_records = np.zeros((configs.UPDATE_NUM, configs.CHANNEL_NUM))
         user_channel_choosing_records = np.zeros((configs.UPDATE_NUM, configs.USER_NUM))
 
-        self.bs_pre_train(bs_agent, old_state)
+        # self.bs_pre_train(bs_agent, old_state)
+
         for e in range(configs.UPDATE_NUM):
             # BS Actor takes an action
             print("------- " + str(e) + " ---------")
-            bs_raw_a_ls, bs_raw_a_ls_no_noise = bs_agent.act(old_state, e)
+            # bs_raw_a_ls, bs_raw_a_ls_no_noise = bs_agent.act(old_state, e)
+            bs_raw_a_ls = bs_agent.act(old_state, e)
             bs_a_ls = bs_agent.get_real_action(bs_raw_a_ls)
             # Jammer takes an action
             jmr_a_ls = jmr_agent.act(old_state, e)
@@ -104,9 +107,7 @@ class Environment:
             print("\033["+info_color+"[Info] Reward: \033[0m" + str(r))
             # Add outputs to memory buffer
             if e > 0:
-                if bs_agent.brain.buffer.count < bs_agent.brain.buffer.buffer_size:
-                    bs_agent.memorize(old_state, bs_raw_a_ls, r, new_state)
-                bs_agent.brain.last_10_buffer.memorize(old_state, bs_raw_a_ls, r, new_state)
+                bs_agent.memorize(old_state, bs_raw_a_ls, r, new_state)
 
             bs_agent.update_brain(e)
             # if e % 5 == 0 and e > configs.BEGIN_TRAINING_EPISONDE:
@@ -143,44 +144,22 @@ class Environment:
             # Update current state
             old_state = new_state
 
-        print("BS station buffer")
-        bs_agent.brain.buffer.print_buffer()
+        # print("BS station buffer")
+        # bs_agent.brain.buffer.print_buffer()
         # ---------- Save models ----------
         # bs_agent.save_brain("results/save_net.ckpt")
         # --------- Write output file ---------
         output_prefix = 'temp_results/' + scenario_name + '/' + model_name + '/' + str(experiment_num) + '_'
         print('write output files to: ', output_prefix)
         # Write reward and success rate to a csv file
-        # csv_file = open('CHACNet Reward list.csv', 'w', newline='')
-        # writer = csv.writer(csv_file)
-        # writer.writerow(reward_list)
-        # csv_file.close()
         self.write_output_file(output_prefix + 'Reward_list.csv', reward_list)
-        # csv_file = open('CHACNet jammed flag list.csv', 'w', newline='')
-        # writer = csv.writer(csv_file)
-        # writer.writerow(jammed_flag_list)
-        # csv_file.close()
+
         self.write_output_file(output_prefix + 'jammed_flag_list.csv', jammed_flag_list)
-        # csv_file = open('CHACNet state records.csv', 'w', newline='')
-        # writer = csv.writer(csv_file)
-        #         # for i in range(bs_agent.state_dim):
-        #         #     state_record = [state_records[j][i] for j in range(configs.UPDATE_NUM)]
-        #         #     writer.writerow(state_record)
-        # csv_file.close()
+
         self.write_output_file(output_prefix + 'state_records.csv', state_records)
-        # csv_file = open('CHACNet power allocation records.csv', 'w', newline='')
-        # writer = csv.writer(csv_file)
-        # for i in range(configs.CHANNEL_NUM):
-        #     power_allocation_record = [power_allocation_records[j][i] for j in range(configs.UPDATE_NUM)]
-        #     writer.writerow(power_allocation_record)
-        # csv_file.close()
+
         self.write_output_file(output_prefix + 'power_allocation_records.csv', power_allocation_records)
-        # csv_file = open('CHACNet channel choosing records.csv', 'w', newline='')
-        # writer = csv.writer(csv_file)
-        # for i in range(configs.USER_NUM):
-        #     state_record = [state_records[j][i] for j in range(configs.UPDATE_NUM)]
-        #     writer.writerow(state_record)
-        # csv_file.close()
+
         self.write_output_file(output_prefix + 'channel_choosing_records.csv', user_channel_choosing_records)
 
 
@@ -195,7 +174,12 @@ def write_log(scenario_name, model_name):
 bs_state_dim = configs.CHANNEL_NUM + 4 * configs.USER_NUM
 bs_act_dim = configs.CHANNEL_NUM + configs.USER_NUM
 env = Environment(bs_state_dim=bs_state_dim, bs_act_dim=bs_act_dim)
-base_station_agent = DdpgPnnAgent(act_range=1.0, state_dim=bs_state_dim, act_dim=bs_act_dim)
+
+"""Choose a BS agent"""
+# base_station_agent = DdpgPnnAgent(act_range=1.0, state_dim=bs_state_dim, act_dim=bs_act_dim)
+base_station_agent = QAgent(act_range=1.0, state_dim=bs_state_dim, act_dim=bs_act_dim)
+
+"""Jammer Agent"""
 jammer_agent = JMRAgent()
 
 scenario_name = 'downlink_basic'

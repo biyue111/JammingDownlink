@@ -61,8 +61,8 @@ class DdpgPnnAgent(AbstractAgent):
             for i in range(configs.USER_NUM):
                 a[i + configs.CHANNEL_NUM] = 0
         print("####")
-        return a, a_no_noise_raw
-
+        # return a, a_no_noise_raw/
+        return a
     def update_brain(self, e):
         # if self.brain.buffer.count > configs.BATCH_SIZE:
         #     self.brain.train()

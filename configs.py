@@ -1,15 +1,18 @@
 import numpy as np
 import math
+from utils.utilFunc import *
 
 # General configs
 CHANNEL_NUM = 3
 UPDATE_NUM = 1000
 SINR_THRESHOLD = 0.5
+DATA_RATE_THRESHOLD = math.log2(1 + SINR_THRESHOLD)
+
 RAW_CHANNEL_STEP = 2.0 / (CHANNEL_NUM * 1.0)
 RAW_CHANNEL_LIST = np.arange(-1.0 + 0.5 * RAW_CHANNEL_STEP, 1.0, RAW_CHANNEL_STEP)
 
 # BS  and users common configs
-USER_NUM = 8
+USER_NUM = 4
 USER_POSITIONS = np.array([[1.0, 1.0], [-1.0, 1.0], [1.0, -1.0], [-1.0, -1.0],
                            [0.9, 0.9], [-0.9, 0.9], [0.9, -0.9], [-0.9, -0.9]])
 POSITION_RANGE = 1.0
@@ -37,3 +40,11 @@ for i in range(USER_NUM):
 print("B2U_PATHLOSS", B2U_PATHLOSS[0], B2U_PATHLOSS[1])
 print("J2U_PATHLOSS", J2U_PATHLOSS[0], J2U_PATHLOSS[1])
 NOISE = 0.01
+
+MAX_SINR = 0
+MAX_DATARATE = 0
+for i in range(USER_NUM):
+    sinr, datarate = calculate_datarate(BS_MAX_POWER, jammer_power=0.0,
+                                        user_num_in_channel=1.0, user_id=i)
+    MAX_DATARATE = max(MAX_DATARATE, datarate)
+    MAX_SINR = max(MAX_SINR, sinr)
