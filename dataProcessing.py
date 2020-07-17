@@ -1,4 +1,5 @@
 import csv
+import configs as configs
 from utils.utilFunc import *
 
 
@@ -16,7 +17,7 @@ def get_max_datarate():
 
 # -------------------- MAIN ----------------------------
 scenario_name = 'downlink_basic'
-model_name = 'DDPG_PNN_SEQ'
+model_name = 'Q_learning_boltzmann'
 experiment_num = 10
 
 for e in range(experiment_num):

@@ -1,5 +1,4 @@
 import math as math
-# from DDPG.ddpg import *
 from DownlinkEnv import *
 import configs as configs
 from tqdm import tqdm
@@ -7,8 +6,8 @@ from utils.utilFunc import *
 import matplotlib.pyplot as plt
 import csv
 from Agents.DDPG_PNN_SQN.agent import DdpgPnnAgent
+from Agents.jammer_agent import JMRAgent
 from Agents.Q_learning.q_agent import QAgent
-from Agents.DDPG_PNN_SQN.agent import JMRAgent  # TODO: seperate JMRAgent
 
 
 # -------------------- ENVIRONMENT ---------------------

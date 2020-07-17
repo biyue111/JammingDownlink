@@ -23,15 +23,14 @@ class QAgent(AbstractAgent):
         self.reward = 0.0
         self.new_state_id = 0
 
-        self.power_level_num = 4  # number of power level
+        self.power_level_num = 13  # number of power level
         self.action_list = []
         self.generate_action_list()
+        self.state_data_rate_level_num = 5  # number of data rate levels in state
         self.state_list = []
         self.generate_state_list()
 
         self.brain = QL(len(self.action_list), len(self.state_list), act_range)
-
-
 
     def generate_state_list(self):
         """
@@ -39,13 +38,14 @@ class QAgent(AbstractAgent):
         data rate level = 0 if data rate < min data rate
         data rate level = 1 if min data rate <= data rate < 2 * min data rate
         data rate level = 2 if data rate >= 2 * min data rate
+        ...
         """
         chosen_channel_list = []
         for chosen_channels in itertools.product(range(configs.CHANNEL_NUM), repeat=configs.USER_NUM):
             l_chosen_channels = [cc for cc in chosen_channels]
             chosen_channel_list.append(l_chosen_channels)
         data_rate_levels_list = []
-        for data_rate_levels in itertools.product([0, 1, 2], repeat=configs.USER_NUM):
+        for data_rate_levels in itertools.product(range(self.state_data_rate_level_num), repeat=configs.USER_NUM):
             l_data_rates_levels = [dr for dr in data_rate_levels]
             data_rate_levels_list.append(l_data_rates_levels)
 
@@ -89,8 +89,9 @@ class QAgent(AbstractAgent):
     def act(self, s, e):
         # Input: state, episode number
         # Output: action
-
-        a_i = self.brain.boltzmann_sampling(self.get_state_index(self.get_q_state(s)))
+        print("q_agent.act q_state:", self.get_q_state(s))
+        a_i = self.brain.boltzmann_sampling(self.get_state_index(self.get_q_state(s)), e)
+        print("q_agent.act action:", self.action_list[a_i])
         return self.action_list[a_i]
 
     def get_real_action(self, raw_a):
@@ -135,13 +136,9 @@ class QAgent(AbstractAgent):
             i += 2  # pass user position
             q_s.append(raw_channel_to_channel(s[i]))
             i += 1
-            dr_level = 0
-            if s[i] < normalized_data_rate_threshild:
-                dr_level = 0
-            elif s[i] < 2 * normalized_data_rate_threshild:
-                dr_level = 1
-            else:
-                dr_level = 2
+            dr_level = math.floor(s[i] / normalized_data_rate_threshild)
+            if dr_level > self.state_data_rate_level_num - 1:
+                dr_level = self.state_data_rate_level_num - 1
             q_s.append(dr_level)
             i += 1
         return q_s

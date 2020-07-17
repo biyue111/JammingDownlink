@@ -4,7 +4,7 @@ from utils.utilFunc import *
 
 # General configs
 CHANNEL_NUM = 3
-UPDATE_NUM = 1000
+UPDATE_NUM = 10000
 SINR_THRESHOLD = 0.5
 DATA_RATE_THRESHOLD = math.log2(1 + SINR_THRESHOLD)
 

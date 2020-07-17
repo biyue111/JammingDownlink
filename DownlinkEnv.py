@@ -58,7 +58,7 @@ class DownlinkEnv:
         sinr_ls = np.zeros(self.user_num)
         jammed_penalty = -5.0
         useless_power_penalty = -1.0
-        min_reward = -2.0
+        min_reward = 0.0
         congested_user_reward_offset = 0.0
         # channel_availability[i][j] = 1: channel i is available for user j
         channel_availability = np.ones((self.channel_num, self.user_num))
@@ -86,7 +86,8 @@ class DownlinkEnv:
         # Check choosing jammed channel or not
         jammed_flag = 0
         for i in range(self.user_num):
-            if sinr_ls[i] < self.sinr_threshold and jammer_power_allocation[user_channel_ls[i]] > 0:
+            # if sinr_ls[i] < self.sinr_threshold and jammer_power_allocation[user_channel_ls[i]] > 0:
+            if sinr_ls[i] < self.sinr_threshold:
                 jammed_flag += 1
 
         reward = 0
@@ -106,7 +107,7 @@ class DownlinkEnv:
 
         reward += sum(datarate_ls)  # TODO: fairness
         reward = max(min_reward, reward)
-        # print("data rate list:" + str(datarate_ls))
+        print("data rate list:" + str(datarate_ls))
 
         return jammed_flag, reward, datarate_ls
 
